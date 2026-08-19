@@ -1,0 +1,51 @@
+name: licenses
+on: workflow_call
+
+# comment on license obligations:
+# Rust dependencies:
+#  Dependencies are header-only, so when we produce a wheel or an .so, we pull in code and distribute it.
+#  For many licenses, this is ok.
+#  dev_tools/about.toml lists the allowed licenses for which we have checked that
+#  the only relevant obligation is to reproduce the license in some form 
+#  and ship it with the code/documentation.
+#  ``cargo about`` then collects the licenses automatically and puts them
+#  in a nice format in THIRD_PARTY_LICENSES.md.
+#  For the wheel, in pyproject.toml we include this file so it ends up in the wheel.
+#  For the .so, we add the third party licenses in the packaging step.
+# Python dependencies:
+#  Wheels do not contain source or binary dependencies, instead just a pointer
+#  to where the dependencies can be found/downloaded. Therefore we do not
+#  distribute code and do not have to think about license-reproduction-obligations.
+# C dependencies:
+#  We use dlpack.h and just manually add it to the license-files path.
+#  Linked dependencies (like libc) are not distributed with the code (same as python dependencies)
+#  so we do not worry about them (their LGPL licenses are made specifically for this case).
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check_licenses:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        submodules: true
+    - uses: dtolnay/rust-toolchain@1.93.0
+    - name: Install cargo-about
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-about@0.9.0
+    - name: Regenerate third-party licenses
+      run: ./dev_tools/generate_third_party_licenses.sh
+    - name: Verify THIRD_PARTY_LICENSES.md is up to date
+      run: |
+        if [ -n "$(git status --porcelain -- THIRD_PARTY_LICENSES.md)" ]; then
+          echo "::error::THIRD_PARTY_LICENSES.md is out of date. Regenerate it locally with:"
+          echo "::error:: cargo clean && rm Cargo.lock && ./dev_tools/generate_third_party_licenses.sh"
+          echo "--- diff ---"
+          git diff -- THIRD_PARTY_LICENSES.md
+          exit 1
+        fi
+        echo "THIRD_PARTY_LICENSES.md is up to date."

@@ -1,0 +1,113 @@
+# Example device config used by the simulated backend
+
+# valid options: SpeedMode1Ghz, SpeedMode2Ghz
+speed_mode_mul = "SpeedMode1Ghz"
+speed_mode_nonlin = "SpeedMode1Ghz"
+
+optical_channels_mul = [0, 2, 5]
+optical_channels_nonlin = [3]
+raw_channel = 0
+available_memory_gb = 13
+
+t_high_mul = 8000
+t_low_mul = 10
+t_safeties_mul = [75, 75]
+
+t_high_nonlin = 4000
+t_low_nonlin = 4000
+t_safeties_nonlin = [1000, 1000]
+
+vlow_fac_mul = 1.0
+vlow_fac_nonlin = -1.0
+slow_dac_range = [-9.0, 9.0]
+sd_change_wait_time_secs = 0.005
+
+# Path delay compensation: unsigned integer values
+offset_adc_coarse = 0 
+offset_adc_fine = 0
+
+offsets_dac_coarse_ch0 = [0, 0]
+offsets_dac_fine_ch0 = [0, 0]
+
+offsets_dac_coarse_ch1 = [0, 0]
+offsets_dac_fine_ch1 = [0, 0]
+
+offsets_dac_coarse_ch2 = [0, 0]
+offsets_dac_fine_ch2 = [0, 0]
+
+offsets_dac_coarse_ch3 = [0, 0]
+offsets_dac_fine_ch3 = [0, 0]
+
+offsets_dac_coarse_ch4 = [0, 0]
+offsets_dac_fine_ch4 = [0, 0]
+
+offsets_dac_coarse_ch5 = [0, 0]
+offsets_dac_fine_ch5 = [0, 0]
+
+offsets_dac_coarse_ch6 = [0, 0]
+offsets_dac_fine_ch6 = [0, 0]
+
+offsets_dac_coarse_ch7 = [0, 0]
+offsets_dac_fine_ch7 = [0, 0]
+
+dac_min_values_eom_mul_ch0 = [-325, -325]
+dac_max_values_eom_mul_ch0 = [325, 325]
+dac_min_values_eom_nonlin_ch0 = [0, -350]
+dac_max_values_eom_nonlin_ch0 = [490, 350]
+
+dac_min_values_eom_mul_ch1 = [-350, -350]
+dac_max_values_eom_mul_ch1 = [350, 350]
+dac_min_values_eom_nonlin_ch1 = [0, -350]
+dac_max_values_eom_nonlin_ch1 = [350, 350]
+
+dac_min_values_eom_mul_ch2 = [-335, -335]
+dac_max_values_eom_mul_ch2 = [335, 335]
+dac_min_values_eom_nonlin_ch2 = [0, -350]
+dac_max_values_eom_nonlin_ch2 = [490, 350]
+
+dac_min_values_eom_mul_ch3 = [-350, -330]
+dac_max_values_eom_mul_ch3 = [350, 330]
+dac_min_values_eom_nonlin_ch3 = [0, -350]
+dac_max_values_eom_nonlin_ch3 = [500, 350]
+
+dac_min_values_eom_mul_ch4 = [-350, -350]
+dac_max_values_eom_mul_ch4 = [350, 350]
+dac_min_values_eom_nonlin_ch4 = [0, -350]
+dac_max_values_eom_nonlin_ch4 = [350, 350]
+
+dac_min_values_eom_mul_ch5 = [-345, -345]
+dac_max_values_eom_mul_ch5 = [345, 345]
+dac_min_values_eom_nonlin_ch5 = [0, -350]
+dac_max_values_eom_nonlin_ch5 = [490, 350]
+
+dac_min_values_eom_mul_ch6 = [-350, -350]
+dac_max_values_eom_mul_ch6 = [350, 350]
+dac_min_values_eom_nonlin_ch6 = [0, -350]
+dac_max_values_eom_nonlin_ch6 = [350, 350]
+
+dac_min_values_eom_mul_ch7 = [-350, -350]
+dac_max_values_eom_mul_ch7 = [350, 350]
+dac_min_values_eom_nonlin_ch7 = [0, -350]
+dac_max_values_eom_nonlin_ch7 = [350, 350]
+
+# Slow Dac bias voltage in volt (optional, float in [-10, 10])
+# If not provided, voltage will be tuned to optimum
+# example values here used for testing with simulated backend (values correspond to hardcoded biases in simulation)
+bias_voltages_mul_ch2 = [1.23456, 2.34567]
+bias_voltages_nonlin_ch5 = [-6.266, 2.34567]
+
+# adc responses above this value will be considered too high (adc clips at 512)
+adc_max_value = 500
+
+# Laser settings
+laser_tec_temperature = [30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000] # Fixed-point, e.g., 25000 = 25.000 celsius
+laser_current = [200, 200, 200, 200, 200, 200, 200, 200]                         # Int in (0..=300) in milliAmpere
+laser_assignments = [["n", 1], ["n", 2], ["n", 3], ["n", 4], ["s", 1], ["s", 2], ["s", 3], ["s", 4]]
+
+pic_tec_temperature = 30000
+
+# Time between slow dac tunings
+slow_dac_calibration_interval_mins = 3.0
+# Slow dac calib triggers encoding calib, so they will happen at the same time
+encoding_calibration_interval_mins = 5.0
+

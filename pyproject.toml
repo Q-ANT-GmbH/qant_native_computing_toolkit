@@ -1,0 +1,51 @@
+[build-system]
+requires = ["maturin>=1.14,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "qant_native_computing_toolkit"
+requires-python = ">=3.9"
+classifiers = [
+  "Programming Language :: Rust",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Programming Language :: Python :: Implementation :: PyPy"
+]
+version = "2.3.0"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md", "external/dlpack/LICENSE"]
+authors = [{name = "Q.ANT GmbH", email = "info@qant.de"}]
+dependencies = [
+  "numpy >= 1.26",
+  "cffi==1.17.1",
+  "ml-dtypes >= 0.5.4"
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest >= 8.3",
+  "torch == 2.5.1"
+]
+doc = [
+  "sphinx >= 7.0",
+  "sphinx-rtd-theme ~= 3.0.2"
+]
+dev = [
+  "ruff ~= 0.9.3",
+  "toml-sort ~= 0.24.2",
+  "mypy ~= 1.14.1"
+]
+
+[tool.maturin]
+python-source = "./python"
+module-name = "qant_native_computing_toolkit._backend"
+features = ["pyo3/extension-module"]
+profile = "release"
+# https://github.com/PyO3/maturin/issues/2038
+auditwheel = "skip"
+
+[tool.mypy]
+disable_error_code = ["import-untyped"]
+
+[tool.pytest.ini_options]
+markers = ["logging: mark all logging tests, as these cannot be executed without driver."]

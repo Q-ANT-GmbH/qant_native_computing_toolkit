@@ -1,0 +1,206 @@
+# general strategy:
+# 1. Build the package and upload it temporarily
+# 2. If successful: In a new container, download the temporary package and test it
+# 3. If successful: Upload the package permanently
+
+name: C
+on:
+  workflow_call:
+    inputs:
+      features:
+        description: "JSON array of feature sets to run. CI limits external (fork) PRs to cpu-backend."
+        type: string
+        required: false
+        default: '["cpu-backend", "default"]'
+      driver_source:
+        description: "Where install_driver fetches the driver from: 'release' or 'artifact'."
+        type: string
+        required: true
+      driver_version:
+        description: "Driver release tag, used when driver_source=release."
+        type: string
+        required: false
+        default: ''
+      driver_run_id:
+        description: "Driver workflow run id, used when driver_source=artifact."
+        type: string
+        required: false
+        default: ''
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build_deb:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        os:
+        # we only need to build one toolkit package
+          - debian:13
+        features: ${{ fromJSON(inputs.features) }}
+      fail-fast: false
+    container: ${{ matrix.os }}
+    steps:
+      - run: |
+          apt update
+          apt install -y git
+      - name: checkout repo
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+      - uses: ./.github/actions/setup_apt
+      - name: Set up dependencies
+        run: |
+          apt update
+          apt install -y curl build-essential cmake patchelf gzip dpkg lintian libclang-dev clang clang-format-19
+          ln -sf /usr/bin/clang-format-19 /usr/bin/clang-format
+      - name: Check formatting
+        shell: bash
+        run: |
+          clang-format --version
+          set -e
+          # use .clang_format style
+          find . -path ./external -prune -o \( -name '*.cpp' -o -name '*.hpp' -o -name '*.c' -o -name '*.h' \) \
+          -exec clang-format --dry-run --Werror {} +
+      - uses: ./.github/actions/install_driver
+        if: ${{ matrix.features != 'cpu-backend' }}
+        with:
+          os: ${{ matrix.os }}
+          source: ${{ inputs.driver_source }}
+          version: ${{ inputs.driver_version }}
+          run-id: ${{ inputs.driver_run_id }}
+          token: ${{ secrets.PAT_DRIVER_REPO_READ }}
+      - uses: dtolnay/rust-toolchain@1.93.0
+      - name: build library (with driver)
+        if: ${{ matrix.features != 'cpu-backend' }}
+        run: cargo build --release --no-default-features
+      - name: build library (standalone)
+        if: ${{ matrix.features == 'cpu-backend' }}
+        run: cargo build --release --no-default-features -F cpu-backend
+      - name: create .deb
+        run: |
+          cargo install tomlq
+          bash ./src/c_bridge/packaging/create_deb.sh ${{ matrix.features }}
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
+        with: 
+          name: tmp-toolkit-package-${{ matrix.features }}
+          path: ./target/deb/qant-native-computing-toolkit*.deb
+          retention-days: 1
+
+  test_deb:
+    runs-on: ubuntu-latest
+    needs: build_deb
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        # toolkit package was built on debian, but is tested on debian and ubuntu as well
+        os:
+          - ubuntu:24.04
+          - debian:13
+        features: ${{ fromJSON(inputs.features) }}
+      fail-fast: false
+    container: ${{ matrix.os }}
+    steps:
+      - run: |
+          apt update
+          apt install -y git
+      - name: checkout repo
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+      - uses: ./.github/actions/setup_apt
+      - name: install test dependencies
+        run: |
+          apt install -y git build-essential valgrind doxygen doxygen-latex graphviz
+      - uses: ./.github/actions/install_driver
+        if: ${{ matrix.features != 'cpu-backend' }}
+        with:
+          os: ${{ matrix.os }}
+          source: ${{ inputs.driver_source }}
+          version: ${{ inputs.driver_version }}
+          run-id: ${{ inputs.driver_run_id }}
+          token: ${{ secrets.PAT_DRIVER_REPO_READ }}
+      - name: Download the toolkit package
+        uses: actions/download-artifact@v8
+        with:
+          name: tmp-toolkit-package-${{ matrix.features }}
+          path: .
+      - name: Install the toolkit
+        shell: bash
+        run: apt install ./qant-native-computing-toolkit*.deb -y
+
+        # some C dependencies are installed into a conda environment
+      - uses: conda-incubator/setup-miniconda@v4.0.1
+        with:
+          channels: conda-forge
+          auto-update-conda: true
+          activate-environment: false
+          miniforge-version: "latest"
+      - name: Create conda environment
+        run: |
+          conda create -n test_env python=3.12 -y 
+          conda init
+      - name: Install GCC-13 
+        shell: bash #to get source
+        run: |
+          apt install -y gcc-13 g++-13
+      - name: C memory test
+        shell: bash #to get source
+        run: | 
+          set -e
+          source ~/.bashrc
+          conda activate test_env
+          conda install -y xtensor=0.25.0 xtensor-blas=0.21.0 cmake=3.31
+          cd ./tests_C/memory_tests/
+          ./run_tests.sh
+      - name: C unit tests
+        if: matrix.os == 'ubuntu:24.04'
+        shell: bash
+        run: |
+          set -e
+          source ~/.bashrc
+          conda activate test_env
+          conda install -y catch2=3.4
+          cd ./tests_C/unit_tests/
+          EXCLUDE="${{ matrix.features == 'cpu-backend' && '-E logging' || '' }}"
+          ./run_tests.sh $EXCLUDE
+      - name: Test docs
+        # doxyfile builds with warn as error
+        run: |
+          cd doc/doxygen/
+          ./gen_doxydoc.sh
+      - name: Upload docs
+        if: ${{ matrix.os == 'ubuntu:24.04' && matrix.features == 'default' }}
+        uses: actions/upload-artifact@v7
+        with: 
+          name: toolkit-c-api-doc
+          path: ./doc/doxygen/build/html
+          retention-days: 14
+
+  upload_deb:
+    runs-on: ubuntu-latest
+    needs: test_deb
+    # The default (real-driver) build only exists on trusted runs; skip on cpu-backend-only (fork) runs.
+    if: ${{ contains(fromJSON(inputs.features), 'default') }}
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v6
+      - name: Download the (tested) toolkit package
+        uses: actions/download-artifact@v8
+        with:
+          name: tmp-toolkit-package-default
+          path: ./packages/default
+      - name: Download the (tested) toolkit package
+        uses: actions/download-artifact@v8
+        with:
+          name: tmp-toolkit-package-cpu-backend
+          path: ./packages/cpu_backend
+      - name: upload package persistently
+        uses: actions/upload-artifact@v7
+        with:
+          name: qant_native_computing_toolkit_package
+          path: ./packages/
+          retention-days: 14

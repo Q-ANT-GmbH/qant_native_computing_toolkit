@@ -1,0 +1,44 @@
+qant-native-computing-toolkit (2.3.0-0) stable; urgency=low
+
+  * Grouping of API into categories.
+  * Change license from MIT to Apache-2.0
+
+ -- Q.ANT GmbH <info@qant.de>  Mon, 20 Jul 2026 12:00:00 +0000
+
+qant-native-computing-toolkit (2.2.0-0) stable; urgency=low
+
+  * Fixed point representation replaced with bfloat16 data type.
+
+ -- Q.ANT GmbH <info@qant.de>  Wed, 06 May 2026 12:00:00 +0000
+
+qant-native-computing-toolkit (2.1.0-0) stable; urgency=low
+
+  * Improved error messages
+  * Added get_available_npus()
+
+ -- Q.ANT GmbH <info@qant.de>  Wed, 04 Feb 2026 12:00:00 +0000
+
+qant-native-computing-toolkit (2.0.1-0) stable; urgency=low
+
+  * Add align_ndarray_page_boundary
+
+ -- Q.ANT GmbH <info@qant.de>  Wed, 28 Jan 2026 12:00:00 +0000
+
+qant-native-computing-toolkit (2.0.0-0) stable; urgency=low
+
+  * Support for driver gen2
+
+ -- Q.ANT GmbH <info@qant.de>  Fri, 22 Aug 2025 12:00:00 +0000
+
+qant-native-computing-toolkit (1.1.0-0) stable; urgency=low
+
+  * Addition of nonlinear functions and KAN layer.
+  * Addition of sensor readout
+
+ -- Q.ANT GmbH <info@qant.de>  Mon, 18 Aug 2025 12:00:00 +0000
+
+qant-native-computing-toolkit (1.0.0-0) stable; urgency=low
+
+  * Initial release.
+
+ -- Q.ANT GmbH <info@qant.de>  Fri, 15 May 2025 12:00:00 +0000

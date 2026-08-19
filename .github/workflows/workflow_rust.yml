@@ -1,0 +1,76 @@
+name: rust
+on:
+  workflow_call:
+    inputs:
+      features:
+        description: "JSON array of feature sets to run. CI limits external (fork) PRs to cpu-backend."
+        type: string
+        required: false
+        default: '["cpu-backend", "default"]'
+      driver_source:
+        description: "Where install_driver fetches the driver from: 'release' or 'artifact'."
+        type: string
+        required: true
+      driver_version:
+        description: "Driver release tag, used when driver_source=release."
+        type: string
+        required: false
+        default: ''
+      driver_run_id:
+        description: "Driver workflow run id, used when driver_source=artifact."
+        type: string
+        required: false
+        default: ''
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build_and_test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        os:
+          - ubuntu:24.04
+          - debian:13
+        features: ${{ fromJSON(inputs.features) }}
+      fail-fast: false
+    container: ${{ matrix.os }}
+
+    steps:
+    - run: |
+        apt update
+        apt install -y git
+    - uses: actions/checkout@v6
+      with:
+        submodules: true
+    - uses: ./.github/actions/setup_apt
+    - name: Set up dependencies
+      run: apt install -y curl build-essential libclang-dev clang jq
+    - uses: dtolnay/rust-toolchain@1.93.0
+      with:
+        components: rustfmt clippy
+    - name: Check rust formatting
+      run: cargo fmt --check
+    - name: Lint rust
+      run: |
+        # need a python environment if we want to activate all features
+        apt install python3-dev -y
+        cargo clippy --all-features -- -D warnings
+    - name: flag unused dependencies
+      uses: bnjbvr/cargo-machete@v0.9.2
+    - uses: ./.github/actions/install_driver
+      if: ${{ matrix.features != 'cpu-backend' }}
+      with:
+        os: ${{ matrix.os }}
+        source: ${{ inputs.driver_source }}
+        version: ${{ inputs.driver_version }}
+        run-id: ${{ inputs.driver_run_id }}
+        token: ${{ secrets.PAT_DRIVER_REPO_READ }}
+    - name: Build and run tests (with driver)
+      if: ${{ matrix.features != 'cpu-backend' }}
+      run: cargo test --benches --verbose --no-default-features
+    - name: Build and run tests (standalone)
+      if: ${{ matrix.features == 'cpu-backend' }}
+      run: cargo test --benches --verbose --no-default-features -F cpu-backend

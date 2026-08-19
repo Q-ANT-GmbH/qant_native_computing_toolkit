@@ -1,0 +1,86 @@
+name: Publish release
+
+on: workflow_call
+
+# Publishes the .deb packages, wheels and API docs built by workflow_c / workflow_python
+# as a GitHub Release. Called by CI only on a version tag and only after all other
+# workflows pass.
+# Ships six bundles: default and cpu-backend variants for debs and wheels, plus the
+# C and Python API doc bundles.
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # needed to read Cargo.toml, pyproject.toml and the C packaging changelog
+      - name: Checkout repo
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      # Fail early if the tag, Cargo.toml, pyproject.toml and the changelog disagree.
+      - name: Check tag, Cargo.toml, pyproject.toml and changelog versions agree
+        run: |
+          cargo install tomlq
+          tag_version="${GITHUB_REF_NAME#v}"
+          # strip an optional _rc release-candidate postfix (e.g. _rc, _rc1) before comparing
+          tag_version="${tag_version%_rc*}"
+          cargo_version=$(tq -r -f Cargo.toml package.version)
+          pyproject_version=$(tq -r -f pyproject.toml project.version)
+          changelog_version=$(sed -n '1s/.*(\([0-9.]*\).*/\1/p' src/c_bridge/packaging/changelog)
+          echo "tag=$tag_version  Cargo.toml=$cargo_version  pyproject.toml=$pyproject_version  changelog=$changelog_version"
+          if [ "$tag_version" != "$cargo_version" ] || [ "$tag_version" != "$pyproject_version" ] || [ "$tag_version" != "$changelog_version" ]; then
+            echo "::error::Version mismatch: tag=$tag_version, Cargo.toml=$cargo_version, pyproject.toml=$pyproject_version, changelog=$changelog_version"
+            exit 1
+          fi
+      - name: Download .deb packages
+        uses: actions/download-artifact@v8
+        with:
+          name: qant_native_computing_toolkit_package
+          path: ./assets/debs
+      - name: Download wheels
+        uses: actions/download-artifact@v8
+        with:
+          name: qant-native-computing-toolkit-wheels
+          path: ./assets/wheels
+      - name: Download C API docs
+        uses: actions/download-artifact@v8
+        with:
+          name: toolkit-c-api-doc
+          path: ./assets/docs/c
+      - name: Download Python API docs
+        uses: actions/download-artifact@v8
+        with:
+          name: toolkit-python-api-doc
+          path: ./assets/docs/python
+      # Debs and wheels each keep the default/ and cpu_backend/ subfolders, so the
+      # identically-named files from the two variants don't collide inside one archive.
+      - name: Bundle packages per variant
+        run: |
+          mkdir -p release_assets
+          tag="${{ github.ref_name }}"
+          ( cd assets/debs/default        && zip -r "$GITHUB_WORKSPACE/release_assets/qant-native-computing-toolkit-deb-default-${tag}.zip" . )
+          ( cd assets/debs/cpu_backend    && zip -r "$GITHUB_WORKSPACE/release_assets/qant-native-computing-toolkit-deb-cpu-backend-${tag}.zip" . )
+          ( cd assets/wheels/default       && zip -r "$GITHUB_WORKSPACE/release_assets/qant-native-computing-toolkit-wheels-default-${tag}.zip" . )
+          ( cd assets/wheels/cpu_backend   && zip -r "$GITHUB_WORKSPACE/release_assets/qant-native-computing-toolkit-wheels-cpu-backend-${tag}.zip" . )
+          # doxygen artifact is already the doc root; sphinx nests the real docs under html/
+          ( cd assets/docs/c              && zip -r "$GITHUB_WORKSPACE/release_assets/qant-native-computing-toolkit-c-api-doc-${tag}.zip" . )
+          ( cd assets/docs/python/html     && zip -r "$GITHUB_WORKSPACE/release_assets/qant-native-computing-toolkit-python-api-doc-${tag}.zip" . )
+          ls -l release_assets
+      # Grab the top entry of the C packaging changelog
+      - name: Extract changelog entry for this version
+        run: |
+          awk 'NR>1 && /^qant-native-computing-toolkit \(/{exit} {print}' src/c_bridge/packaging/changelog > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+      - name: Create GitHub Release and attach bundles
+        uses: softprops/action-gh-release@v2
+        with:
+          # published as a pre-release: consumable for validation, flagged unstable,
+          # never "Latest". Promote with `gh release edit vX.Y.Z --prerelease=false --latest`.
+          prerelease: true
+          # release notes = this version's changelog entry, followed by GitHub's
+          # auto-generated "What's Changed" (merged PR links + contributors).
+          body_path: RELEASE_NOTES.md
+          generate_release_notes: true
+          files: release_assets/*.zip
+          fail_on_unmatched_files: true

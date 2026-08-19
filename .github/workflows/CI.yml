@@ -1,0 +1,98 @@
+name: CI
+on:
+  push:
+    branches:
+      - main
+      - latest
+      - gen2
+      - 'release/**'
+    tags:
+      - 'v*'
+  pull_request:
+
+# If driver is available, get it from this source:
+env:
+  # 'release' (pinned by tag) or 'artifact' (pinned by run id)
+  DRIVER_SOURCE: release 
+  # release tag, used when DRIVER_SOURCE=release      
+  DRIVER_VERSION: v2.3.1
+  # driver workflow run id, used when DRIVER_SOURCE=artifact    
+  # -> https://github.com/Q-ANT-GmbH/qant_native_computing_driver/actions/runs/29239220125
+  DRIVER_RUN_ID: "29239220125"            
+  
+
+jobs:
+  # If the repo does not have access to the driver, do not run tests that require the driver.
+  # IF there is access to the driver, pass the version to the individual workflows.
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      features: ${{ steps.check_driver_available.outputs.features }}
+      driver_source: ${{ steps.pin_driver_version.outputs.source }}
+      driver_version: ${{ steps.pin_driver_version.outputs.version }}
+      driver_run_id: ${{ steps.pin_driver_version.outputs.run_id }}
+    steps:
+      - id: check_driver_available
+        env:
+          # empty string when the secret is not available to this run (e.g. fork PRs)
+          DRIVER_TOKEN: ${{ secrets.PAT_DRIVER_REPO_READ }}
+        run: |
+          if [ -n "$DRIVER_TOKEN" ]; then
+            echo "Driver secret present -> full matrix including the real driver."
+            echo 'features=["cpu-backend", "default"]' >> "$GITHUB_OUTPUT"
+          else
+            echo "Driver secret absent -> cpu-backend only."
+            echo 'features=["cpu-backend"]' >> "$GITHUB_OUTPUT"
+          fi
+      - id: pin_driver_version
+        run: |
+          echo "source=$DRIVER_SOURCE"   >> "$GITHUB_OUTPUT"
+          echo "version=$DRIVER_VERSION" >> "$GITHUB_OUTPUT"
+          echo "run_id=$DRIVER_RUN_ID"   >> "$GITHUB_OUTPUT"
+  
+  workflow_rust:
+    needs: gate
+    uses: ./.github/workflows/workflow_rust.yml
+    secrets: inherit
+    with:
+      features: ${{ needs.gate.outputs.features }}
+      driver_source: ${{ needs.gate.outputs.driver_source }}
+      driver_version: ${{ needs.gate.outputs.driver_version }}
+      driver_run_id: ${{ needs.gate.outputs.driver_run_id }}
+  workflow_python:
+    needs: [gate, workflow_rust]
+    uses: ./.github/workflows/workflow_python.yml
+    secrets: inherit
+    with:
+      features: ${{ needs.gate.outputs.features }}
+      driver_source: ${{ needs.gate.outputs.driver_source }}
+      driver_version: ${{ needs.gate.outputs.driver_version }}
+      driver_run_id: ${{ needs.gate.outputs.driver_run_id }}
+  workflow_C:
+    needs: [gate, workflow_rust]
+    uses: ./.github/workflows/workflow_c.yml
+    secrets: inherit
+    with:
+      features: ${{ needs.gate.outputs.features }}
+      driver_source: ${{ needs.gate.outputs.driver_source }}
+      driver_version: ${{ needs.gate.outputs.driver_version }}
+      driver_run_id: ${{ needs.gate.outputs.driver_run_id }}
+  workflow_licenses:
+    uses: ./.github/workflows/workflow_licenses.yml
+  # publish C + Python API docs to GitHub Pages
+  docs_to_gh_pages:
+    needs: [workflow_python, workflow_C]
+    if: ${{ github.ref == 'refs/heads/latest' }}
+    permissions:
+      contents: read   # checkout for the landing page
+      pages: write     # deploy to Pages
+      id-token: write  # OIDC token deploy-pages needs
+    uses: ./.github/workflows/workflow_gh_pages.yml
+
+  # Publish a release only on a version tag, and only once every other workflow passes.
+  release:
+    needs: [workflow_rust, workflow_python, workflow_C, workflow_licenses]
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    permissions:
+      contents: write
+    uses: ./.github/workflows/workflow_release.yml

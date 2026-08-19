@@ -1,0 +1,96 @@
+name: "Install qant native computing driver"
+description: "Downloads the simulated driver .deb from the private driver repo (release asset or dev workflow artifact) and installs it"
+
+inputs:
+  os:
+    description: "OS name (e.g. ubuntu:24.04)"
+    required: true
+  source:
+    description: "Where to fetch the driver from: 'release' (GitHub (pre)release asset) or 'artifact' (dev workflow artifact)"
+    required: true
+  version:
+    description: "Release tag to install when source=release (e.g. v2.2.0)."
+    required: false
+    default: "v2.2.0"
+  run-id:
+    description: "Workflow run id in the driver repo to pull from when source=artifact"
+    required: false
+    default: "28852863399"
+  token:
+    description: "Token for the driver repo: contents:read for releases and/or actions:read for artifacts"
+    required: true
+  repo:
+    description: "repo that builds the driver .deb"
+    required: false
+    default: "Q-ANT-GmbH/qant_native_computing_driver"
+
+runs:
+  using: "composite"
+  steps:
+    - name: os without colons
+      id: os_name
+      shell: bash
+      run: echo "OS_NAME_WO_COLON=$(echo '${{ inputs.os }}' | sed 's/:/_/g')" >> "$GITHUB_OUTPUT"
+
+    # source=release: install the tooling needed to pull the release bundle.
+    # gh is not in the distro repos, so install it from GitHub's official apt repo.
+    - name: install gh CLI and unzip
+      if: ${{ inputs.source == 'release' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        apt-get update
+        apt-get install -y unzip
+        if ! command -v gh >/dev/null 2>&1; then
+          apt-get install -y curl ca-certificates
+          mkdir -p -m 755 /etc/apt/keyrings
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+            -o /etc/apt/keyrings/githubcli-archive-keyring.gpg
+          chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+            > /etc/apt/sources.list.d/github-cli.list
+          apt-get install -y gh
+        fi
+
+    # source=release: pull the simulated release bundle with the official gh CLI.
+    # Asset name mirrors the driver repo's publish-release workflow:
+    #   qant-native-computing-driver-simulated-<tag>.zip  ->  <os>/qant*.deb
+    - name: download simulated release bundle
+      if: ${{ inputs.source == 'release' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        REPO: ${{ inputs.repo }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        BUNDLE="qant-native-computing-driver-simulated-${VERSION}.zip"
+        # Explicit tag downloads the pre-release regardless of "Latest" status.
+        gh release download "$VERSION" --repo "$REPO" --pattern "$BUNDLE" --dir . --clobber
+        mkdir -p driver_pkg
+        unzip -o "$BUNDLE" -d driver_pkg
+
+    # source=artifact: pull the simulated dev workflow artifact (beware: can expire on driver side)
+    # Same nested layout as the release bundle: <os>/qant*.deb
+    - name: download simulated dev artifact
+      if: ${{ inputs.source == 'artifact' }}
+      uses: actions/download-artifact@v7
+      with:
+        github-token: ${{ inputs.token }}
+        repository: ${{ inputs.repo }}
+        run-id: ${{ inputs.run-id }}
+        name: qant-native-computing-driver-packages-simulated
+        path: driver_pkg
+
+    - name: install driver
+      shell: bash
+      # Both sources unpack to <os>/qant*.deb.
+      run: apt install -y ./driver_pkg/${{ steps.os_name.outputs.OS_NAME_WO_COLON }}/qant*.deb
+
+    - name: install device configs (simulated npus)
+      shell: bash
+      # The driver is looking for the npu device configs in /etc/qant_native_computing_driver
+      # We install three dummy configs for the CI tests
+      run: |
+        mkdir -p /etc/qant-native-computing-driver/
+        cp dep/configs/* /etc/qant-native-computing-driver/

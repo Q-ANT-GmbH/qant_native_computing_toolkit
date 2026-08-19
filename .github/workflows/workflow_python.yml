@@ -1,0 +1,320 @@
+# general strategy:
+# 1. Build the wheel and upload it temporarily
+# 2. If successful: In a new container, download the temporary wheel and test it
+# 3. If successful: Upload the wheel permanently
+
+name: python
+on:
+  workflow_call:
+    inputs:
+      features:
+        description: "JSON array of feature sets to run. CI limits external (fork) PRs to cpu-backend."
+        type: string
+        required: false
+        default: '["cpu-backend", "default"]'
+      driver_source:
+        description: "Where install_driver fetches the driver from: 'release' or 'artifact'."
+        type: string
+        required: true
+      driver_version:
+        description: "Driver release tag, used when driver_source=release."
+        type: string
+        required: false
+        default: ''
+      driver_run_id:
+        description: "Driver workflow run id, used when driver_source=artifact."
+        type: string
+        required: false
+        default: ''
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build_whl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15   
+
+    strategy:
+      matrix:
+        os:
+        # we only need to build toolkit wheel on one distro
+          - debian:13
+        python-ver:
+          - 3.12
+          - 3.13
+        features: ${{ fromJSON(inputs.features) }}
+      fail-fast: false
+
+    container: ${{ matrix.os }}
+
+    steps:
+    - run: |
+        apt update
+        apt install -y git
+    - name: checkout repo
+      uses: actions/checkout@v6
+      with:
+        submodules: true
+    - uses: ./.github/actions/setup_apt
+    - name: install dependencies
+      run: apt install -y curl build-essential libclang-dev clang
+    - uses: dtolnay/rust-toolchain@1.93.0
+    # env required by maturin
+    - uses: conda-incubator/setup-miniconda@v4.0.1
+      with:
+        channels: conda-forge
+        auto-update-conda: true
+        activate-environment: false
+    - name: Create conda environment
+      run: |
+        # use non-default python version to test compatibility
+        conda create -n test_env python=${{matrix.python-ver}} pip -y 
+        conda init
+    - name: Linting, format and type checking of python files
+      shell: bash
+      run: | 
+        set -e
+        source ~/.bashrc
+        conda activate test_env
+        pip3 install ruff
+        pip3 install toml-sort
+        ruff check python/
+        ruff format --check python/
+        toml-sort --check pyproject.toml
+    - uses: ./.github/actions/install_driver
+      if: ${{ matrix.features != 'cpu-backend' }}
+      with:
+        os: ${{ matrix.os }}
+        source: ${{ inputs.driver_source }}
+        version: ${{ inputs.driver_version }}
+        run-id: ${{ inputs.driver_run_id }}
+        token: ${{ secrets.PAT_DRIVER_REPO_READ }}
+    - name: Build rust lib and python package
+      shell: bash
+      run: |
+        set -e
+        source ~/.bashrc
+        conda activate test_env
+        pip3 install maturin
+        # condition && value_if_true || value_if_false
+        RUST_FEATURES="${{ matrix.features != 'default' && '-F cpu-backend' || '' }}"
+        maturin build $RUST_FEATURES
+        maturin develop $RUST_FEATURES
+    - name: build docs
+      if: ${{ matrix.features != 'cpu-backend' }}
+      shell: bash
+      run: |
+        set -e
+        source ~/.bashrc
+        conda activate test_env
+        pip3 install .[doc]
+        sphinx-build -M html doc/python/source/ doc/python/build/ --fail-on-warning
+    - name: upload tmp wheel
+      uses: actions/upload-artifact@v7
+      with: 
+        name: tmp-toolkit-whl-${{matrix.python-ver}}-${{matrix.features}}
+        path: ./target/wheels/qant_native_computing_toolkit*.whl
+        retention-days: 1
+    - name: upload API documentation
+      if: matrix.python-ver == '3.12' && matrix.features == 'default'
+      uses: actions/upload-artifact@v7
+      with: 
+        name: toolkit-python-api-doc
+        path: doc/python/build/
+        retention-days: 14
+
+  build_whl_native:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+        python-ver:
+          - 3.12
+        features:
+          - cpu-backend
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+    - name: checkout repo
+      uses: actions/checkout@v6
+      with:
+        submodules: true
+    - uses: dtolnay/rust-toolchain@1.93.0
+    - name: Set LIBCLANG_PATH (Windows only, required by bindgen)
+      if: runner.os == 'Windows'
+      shell: bash
+      run: echo 'LIBCLANG_PATH=C:\Program Files\LLVM\bin' >> $GITHUB_ENV
+    - uses: conda-incubator/setup-miniconda@v4.0.1
+      with:
+        channels: conda-forge
+        miniforge-version: latest
+        python-version: ${{ matrix.python-ver }}
+        activate-environment: test_env
+    - name: Build rust lib and python package
+      shell: bash -l {0}
+      run: |
+        set -e
+        pip install maturin
+        maturin build -F cpu-backend
+    - name: upload tmp wheel
+      uses: actions/upload-artifact@v7
+      with:
+        name: tmp-toolkit-whl-${{ matrix.python-ver }}-${{ matrix.features }}-${{ matrix.os }}
+        path: ./target/wheels/qant_native_computing_toolkit*.whl
+        retention-days: 1
+
+  test_whl:
+    runs-on: ubuntu-latest
+    needs: build_whl
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        # toolkit whl was built on debian, but is tested on debian and ubuntu as well
+        os:
+          - ubuntu:24.04
+          - debian:13
+        python-ver:
+          - 3.12
+          - 3.13
+        features: ${{ fromJSON(inputs.features) }}
+      fail-fast: false
+    container: ${{ matrix.os }}
+    steps:
+      - run: |
+          apt update
+          apt install -y git
+      - name: checkout repo
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+      - uses: ./.github/actions/setup_apt
+      - uses: ./.github/actions/install_driver
+        if: ${{ matrix.features != 'cpu-backend' }}
+        with:
+          os: ${{ matrix.os }}
+          source: ${{ inputs.driver_source }}
+          version: ${{ inputs.driver_version }}
+          run-id: ${{ inputs.driver_run_id }}
+          token: ${{ secrets.PAT_DRIVER_REPO_READ }}
+      - name: Download the toolkit whl
+        uses: actions/download-artifact@v8
+        with:
+          name: tmp-toolkit-whl-${{matrix.python-ver}}-${{matrix.features}}
+          path: .
+      - uses: conda-incubator/setup-miniconda@v4.0.1
+        with:
+          channels: conda-forge
+          auto-update-conda: true
+          activate-environment: false
+      - name: Create conda environment
+        run: |
+          conda create -n test_env python=${{matrix.python-ver}} pip -y 
+          conda init
+      - name: Install the toolkit
+        shell: bash
+        run: |
+          set -e
+          source ~/.bashrc
+          conda activate test_env
+          pip3 install ./qant_native_computing_toolkit*.whl
+          pip3 install pytest 
+          pip3 install mypy
+          pip3 install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+      - name: Run tests
+        shell: bash
+        run: |
+          set -e
+          source ~/.bashrc
+          conda activate test_env
+          if [[ "${{ matrix.features }}" == "cpu-backend" ]]; then
+            pytest -m "not logging"
+          else
+            pytest
+          fi
+          mypy ./python/
+
+  test_whl_native:
+    needs: build_whl_native
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+        python-ver:
+          - 3.12
+        features:
+          - cpu-backend
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - name: checkout repo
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+      - name: Download the toolkit whl
+        uses: actions/download-artifact@v8
+        with:
+          name: tmp-toolkit-whl-${{ matrix.python-ver }}-${{ matrix.features }}-${{ matrix.os }}
+          path: .
+      - uses: conda-incubator/setup-miniconda@v4.0.1
+        with:
+          channels: conda-forge
+          miniforge-version: latest
+          python-version: ${{ matrix.python-ver }}
+          activate-environment: test_env
+      - name: Install the toolkit
+        shell: bash -l {0}
+        run: |
+          set -e
+          pip install ./qant_native_computing_toolkit*.whl
+          pip install pytest mypy
+          # macOS has no CUDA so PyPI already provides CPU-only torch; the cpu index is Linux/Windows only
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            pip install torch==2.5.1
+          else
+            pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+          fi
+      - name: Run tests
+        shell: bash -l {0}
+        run: |
+          set -e
+          pytest -m "not logging"
+          mypy ./python/
+
+  upload_whl:
+    runs-on: ubuntu-latest
+    needs: [test_whl, test_whl_native]
+    # The default (real-driver) wheels only exist on trusted runs; skip on cpu-backend-only (fork) runs.
+    if: ${{ contains(fromJSON(inputs.features), 'default') }}
+    steps:
+      - name: Download the (tested) toolkit whl
+        uses: actions/download-artifact@v8
+        with:
+          name: tmp-toolkit-whl-3.13-default
+          path: ./wheels/default
+      - name: Download the (tested) toolkit whl
+        uses: actions/download-artifact@v8
+        with:
+          name: tmp-toolkit-whl-3.12-default
+          path: ./wheels/default
+      - name: Download the (tested) toolkit whl 
+        uses: actions/download-artifact@v8
+        with:
+          name: tmp-toolkit-whl-3.12-cpu-backend
+          path: ./wheels/cpu_backend
+      - name: Download Windows cpu-backend wheel (py3.12)
+        uses: actions/download-artifact@v8
+        with:
+          name: tmp-toolkit-whl-3.12-cpu-backend-windows-latest
+          path: ./wheels/cpu_backend
+      - name: Download macOS cpu-backend wheel (py3.12)
+        uses: actions/download-artifact@v8
+        with:
+          name: tmp-toolkit-whl-3.12-cpu-backend-macos-latest
+          path: ./wheels/cpu_backend
+      - name: upload package persistently
+        uses: actions/upload-artifact@v7
+        with:
+          name: qant-native-computing-toolkit-wheels
+          path: ./wheels/
+          retention-days: 14

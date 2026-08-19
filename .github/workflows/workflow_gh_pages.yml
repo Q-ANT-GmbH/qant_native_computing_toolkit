@@ -1,0 +1,50 @@
+name: docs to gh pages
+
+# Publishes the API docs to GitHub Pages:
+#   /         -> landing page (doc/assets/gh_pages/index.html)
+#   /c/       -> C API reference (doxygen, artifact toolkit-c-api-doc)
+#   /python/  -> Python API reference (sphinx, artifact toolkit-python-api-doc)
+# The doc artifacts are produced by workflow_c / workflow_python
+on: workflow_call
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # deploy-pages reports the published URL through the github-pages environment
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Checkout (for the landing page)
+        uses: actions/checkout@v6
+
+      - name: Download C API docs (doxygen)
+        uses: actions/download-artifact@v8
+        with:
+          name: toolkit-c-api-doc
+          path: site/c
+
+      - name: Download Python API docs (sphinx)
+        uses: actions/download-artifact@v8
+        with:
+          name: toolkit-python-api-doc
+          path: _python
+
+      - name: Assemble site
+        shell: bash
+        run: |
+          set -euo pipefail
+          # sphinx `-M html` nests its output under html/; flatten it into python/
+          mkdir -p site/python
+          cp -r _python/html/. site/python/
+          # landing page at the site root, linking through to c/ and python/
+          cp doc/assets/gh_pages/index.html site/index.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

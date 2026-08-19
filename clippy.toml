@@ -1,0 +1,5 @@
+disallowed-macros = ["std::assert", "std::assert_eq", "std::println", "std::eprintln", "std::panic"]
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-unwrap-in-tests = true
+too-many-arguments-threshold = 10
