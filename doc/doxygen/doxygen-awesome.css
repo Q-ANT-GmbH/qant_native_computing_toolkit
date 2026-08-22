@@ -991,6 +991,22 @@ html.dark-mode div.contents .dotgraph iframe
     filter: brightness(89%) hue-rotate(180deg) invert();
 }
 
+img.formulaInl {
+    vertical-align: middle;
+}
+
+/* render latex images white in dark mode */
+@media (prefers-color-scheme: dark) {
+    html:not(.light-mode) img.formulaInl,
+    html:not(.light-mode) img.formulaDsp {
+        filter: invert(1) !important;
+    }
+}
+html.dark-mode img.formulaInl,
+html.dark-mode img.formulaDsp {
+    filter: invert(1) !important;
+}
+
 h2.groupheader {
     border-bottom: 0px;
     color: var(--page-foreground-color);
