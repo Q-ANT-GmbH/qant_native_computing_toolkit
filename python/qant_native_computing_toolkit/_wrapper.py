@@ -284,9 +284,15 @@ def calc_scaled_periodic_nl_fprop(
     features: np.ndarray, weights: np.ndarray, device_id: int = 0
 ) -> np.ndarray:
     """
-    Calculates a scaled periodic nonlinearity pairwise for all elements of features u and weights v.
-    The output for each input pair is w(u,v) = f(u) * v, where f() is a 2pi - periodic function
-    with values between -1 and 1, similar to a cosine.
+    Calculates a scaled periodic nonlinearity pairwise for all elements of features
+    :math:`u` and weights :math:`v`. For each input pair, the output is
+
+    .. math::
+
+       w(u, v) = \\operatorname{tcos}(u) \\cdot v
+
+    where :math:`\\operatorname{tcos}` is a :math:`2\\pi`-periodic function with
+    values between :math:`-1` and :math:`1`, similar to a cosine.
 
     Args:
         features (np.ndarray): A 1D array of input features. Must be dtype=bfloat16.
@@ -312,11 +318,21 @@ def calc_kan_layer_fprop(
     device_id: int = 0,
 ) -> np.ndarray:
     """
-    Calculates a Q.ANT version of a KAN layer (https://arxiv.org/abs/2404.19756) based on scaled_periodic_nl.
-    The mathematical function is y_j = sum_{i, l} tcos(ks_l * x_i + phis_{jil}) * ampls_{jil},
-    where x_i is the input (vector), ks the frequency components,
-    phis the phase offsets (tensor) and ampls the amplitude (tensor) and y_j the output (vector).
-    tcos() denotes the cosine-related shape of the periodic optical nonlinearity.
+    Calculates a Q.ANT version of a KAN layer (https://arxiv.org/abs/2404.19756)
+    based on :func:`calc_scaled_periodic_nl_fprop
+    <qant_native_computing_toolkit.native.calc_scaled_periodic_nl_fprop>`.
+    The mathematical function is
+
+    .. math::
+
+       y_j = \\sum_{i, l} \\operatorname{tcos}(\\mathrm{ks}_l \\cdot x_i
+       + \\phi_{jil}) \\cdot \\mathrm{ampls}_{jil},
+
+    where :math:`x_i` is the input (vector), :math:`\\mathrm{ks}` the frequency
+    components, :math:`\\phi` the phase offsets (tensor),
+    :math:`\\mathrm{ampls}` the amplitude (tensor), and :math:`y_j` the output
+    (vector). :math:`\\operatorname{tcos}` denotes the cosine-related shape of the
+    periodic optical nonlinearity.
 
     Args:
         features (np.ndarray): An ND input array with shape (<batch dimensions>, n_channels_in), dtype=bfloat16.

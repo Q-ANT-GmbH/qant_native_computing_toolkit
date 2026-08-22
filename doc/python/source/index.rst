@@ -36,7 +36,6 @@ Native math functionality
 .. automodule:: qant_native_computing_toolkit.native
    :members:
    :imported-members:
-   :no-index:
 
 AI functionality
 ----------------
