@@ -30,6 +30,7 @@ Cargo.lock
 
 **/__pycache__
 **/*cpython*
+.venv/
 
 ## Added by Sphinx (python documentation)
 doc/python/build/

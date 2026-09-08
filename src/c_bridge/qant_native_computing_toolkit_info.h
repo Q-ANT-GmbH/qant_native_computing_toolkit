@@ -18,7 +18,9 @@ namespace qant_native_computing_toolkit::info
 #endif
 
         /**
-         * @brief Enable logging. Log messages are written to stdout and to a file
+         * @brief Enables logging.
+         *
+         * Log messages are written to stdout and to a file
          *
          * @param folder_name The folder where the log files are created. Individual
          * logfiles are created with a timestamp.

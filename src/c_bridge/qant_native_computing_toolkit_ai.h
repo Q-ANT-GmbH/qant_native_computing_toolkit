@@ -17,8 +17,7 @@ namespace qant_native_computing_toolkit::ai
 #endif
 
         /**
-         * @brief Performs a forward pass through a bias adder. Aka element-wise
-         * addition. Supports batched input.
+         * @brief Element-wise addition. Supports batched input.
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
          * @param features: A 2D tensor with data type bfloat16 and shape (n_batches, n_channels).
@@ -29,8 +28,7 @@ namespace qant_native_computing_toolkit::ai
                                                  DLManagedTensorVersioned const *bias);
 
         /**
-         * @brief Performs a forward pass through a bias adder. Aka element-wise
-         * addition. Specifically used for conv2d.
+         * @brief Element-wise addition. Specifically used for conv2d.
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
          * @param features: A 4D tensor with data type bfloat16 and shape (n_batches,
@@ -43,6 +41,8 @@ namespace qant_native_computing_toolkit::ai
 
         /**
          * @brief Performs a forward pass through a ReLU layer.
+         *
+         * For a mathematical definition, see
          * https://en.wikipedia.org/wiki/Rectifier_(neural_networks)
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
@@ -53,6 +53,8 @@ namespace qant_native_computing_toolkit::ai
 
         /**
          * @brief Performs a forward pass through a Sigmoid layer.
+         *
+         * For a mathematical definition, see
          * https://en.wikipedia.org/wiki/Sigmoid_function
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
@@ -63,6 +65,8 @@ namespace qant_native_computing_toolkit::ai
 
         /**
          * @brief Performs a forward pass through a Softmax layer.
+         *
+         * For a mathematical definition, see
          * https://en.wikipedia.org/wiki/Softmax_function
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
@@ -114,6 +118,8 @@ namespace qant_native_computing_toolkit::ai
 
         /**
          * @brief Performs a forward pass through a batchnorm2d layer
+         *
+         * For a mathematical definition, see
          * https://en.wikipedia.org/wiki/Batch_normalization
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
@@ -139,6 +145,8 @@ namespace qant_native_computing_toolkit::ai
 
         /**
          * @brief Performs a forward pass through a maxpooling2d layer
+         *
+         * For a mathematical definition, see
          * https://en.wikipedia.org/wiki/Pooling_layer
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
@@ -160,6 +168,8 @@ namespace qant_native_computing_toolkit::ai
 
         /**
          * @brief Performs a forward pass through a avgpooling2d layer
+         *
+         * For a mathematical definition, see
          * https://en.wikipedia.org/wiki/Pooling_layer
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
@@ -182,6 +192,7 @@ namespace qant_native_computing_toolkit::ai
 
         /**
          * @brief Performs a forward pass through an adaptive maxpooling2d layer.
+         *
          * Only works for symmetric input and output sizes. Input size has to be integer multiple of output size.
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
@@ -197,6 +208,7 @@ namespace qant_native_computing_toolkit::ai
 
         /**
          * @brief Performs a forward pass through an adaptive avgpooling2d layer.
+         *
          * Only works for symmetric input and output sizes. Input size has to be integer multiple of output size.
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
@@ -211,11 +223,17 @@ namespace qant_native_computing_toolkit::ai
                                                            size_t const output_width);
 
         /**
-         * @brief Calculates a Q.ANT version of a KAN layer (https://arxiv.org/abs/2404.19756) based on scaled_periodic_nl.
-         * The mathematical function is y_j = sum_{i, l} tcos(ks_l * x_i + phis_{jil}) * ampls_{jil},
-         * where x_i is the input (vector), ks the frequency components,
-         * phis the phase offsets (tensor) and ampls the amplitude (tensor) and y_j the output (vector).
-         * tcos() denotes the cosine-related shape of the periodic optical nonlinearity.
+         * @brief Calculates a Q.ANT version of a KAN layer (https://arxiv.org/abs/2404.19756) based on
+         * @ref calc_scaled_periodic_nl_fprop "scaled_periodic_nl".
+         *
+         * The mathematical function is
+         * @f[
+         *     y_j = \sum_{i,l} \mathrm{tcos}\!\left(ks_l x_i + \phi_{jil}\right) ampls_{jil},
+         * @f]
+         * where @f$x_i@f$ is the input (vector), @f$ks_l@f$ is the frequency components,
+         * @f$\phi_{jil}@f$ the phase offsets (tensor) and @f$ampls_{jil}@f$ the amplitude (tensor)
+         * and @f$y_j@f$ output (vector). @f$\mathrm{tcos}@f$ denotes the cosine-related shape of the
+         * periodic optical nonlinearity.
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
          * @param features: A 2D input tensor with shape (n_batches, n_channels_in), with data type bfloat16.

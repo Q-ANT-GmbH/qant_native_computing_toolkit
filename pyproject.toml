@@ -2,6 +2,37 @@
 requires = ["maturin>=1.14,<2.0"]
 build-backend = "maturin"
 
+# Development dependencies (PEP 735). Unlike extras these install without
+# building the extension module, so they work on a machine without the Q.ANT
+# driver: `pip install --group dev`.
+# See CONTRIBUTING.md for the full local setup.
+[dependency-groups]
+# keep in sync with the maturin pin in [build-system] requires
+build = ["maturin >= 1.14, < 2.0"]
+dev = [
+  {include-group = "build"},
+  {include-group = "doc"},
+  {include-group = "lint"},
+  {include-group = "test"}
+]
+doc = [
+  "sphinx >= 7.0",
+  "sphinx-rtd-theme ~= 3.0.2"
+]
+lint = [
+  "mypy ~= 1.14.1",
+  "ruff ~= 0.9.3",
+  "toml-sort ~= 0.24.2"
+]
+test = ["pytest >= 8.3"]
+# The tests need torch as a reference implementation, but it is deliberately NOT
+# part of `test` or `dev`: on Linux and Windows, PyPI serves a torch that bundles
+# CUDA and pulls in the nvidia-* wheels, which is several GB and fills up CI
+# runners. Install it separately from the CPU index instead:
+# `pip install --group torch --index-url https://download.pytorch.org/whl/cpu`
+# On macOS there is no CUDA build, so plain `pip install --group torch` is fine.
+torch = ["torch == 2.5.1"]
+
 [project]
 name = "qant_native_computing_toolkit"
 requires-python = ">=3.9"
@@ -10,7 +41,7 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy"
 ]
-version = "2.3.0"
+version = "2.3.1"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md", "external/dlpack/LICENSE"]
@@ -19,21 +50,6 @@ dependencies = [
   "numpy >= 1.26",
   "cffi==1.17.1",
   "ml-dtypes >= 0.5.4"
-]
-
-[project.optional-dependencies]
-test = [
-  "pytest >= 8.3",
-  "torch == 2.5.1"
-]
-doc = [
-  "sphinx >= 7.0",
-  "sphinx-rtd-theme ~= 3.0.2"
-]
-dev = [
-  "ruff ~= 0.9.3",
-  "toml-sort ~= 0.24.2",
-  "mypy ~= 1.14.1"
 ]
 
 [tool.maturin]

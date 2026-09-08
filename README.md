@@ -31,7 +31,7 @@ This repository uses git submodules, which must be checked out before building. 
 | Python   | If you have Q.ANT hardware, install the package via ``pip install .``. If you want to use the SDK in standalone mode, ``pip install maturin`` and install the package via ``maturin develop -F cpu-backend`` |
 | C/C++    | Build the shared library with ``cargo build --release``. Pass ``-F cpu-backend`` for standalone mode. Use [create_deb.sh](src/c_bridge/packaging/create_deb.sh) to build the debian package. Then install via ``apt install ./target/deb/qant-native-computing-toolkit.<version>.deb``|
 
-For more details, see the respective workflows [`workflow_python.yml`](.github/workflows/workflow_python.yml) and [`workflow_c.yml`](.github/workflows/workflow_c.yml).
+Building from source needs a toolchain per language. [CONTRIBUTING.md](CONTRIBUTING.md#setting-up-a-local-development-environment) documents the full setup, including how to build and test without Q.ANT hardware.
 
 ## Documentation
 

@@ -1,0 +1,23 @@
+name: "Setup Rust"
+description: "Installs the Rust toolchain pinned by rust-toolchain.toml"
+
+runs:
+  using: "composite"
+  steps:
+    # The GitHub-hosted runners ship rustup, the distro containers do not.
+    # --default-toolchain none leaves the toolchain choice to rust-toolchain.toml.
+    - name: install rustup
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! command -v rustup > /dev/null 2>&1; then
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --no-modify-path --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+        fi
+
+    # Without a toolchain argument rustup installs the active toolchain, i.e. the
+    # channel, profile and components from rust-toolchain.toml.
+    - name: install toolchain pinned by rust-toolchain.toml
+      shell: bash
+      run: rustup toolchain install

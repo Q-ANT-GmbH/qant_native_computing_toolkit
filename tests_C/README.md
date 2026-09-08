@@ -1,6 +1,5 @@
-Uses and requires the [catch2](https://github.com/catchorg/Catch2) framework for testing, at least at version 3.4.
-Under ubuntu, this can be installed via apt. For other OS (e.g. Debian11), one can install a recent version of catch2 via conda.
-Uses and requires [xtensor](https://github.com/xtensor-stack/xtensor) and [xtensor-blas](https://github.com/xtensor-stack/xtensor-blas) for the cpp tensor representations, both can be installed via conda
+Uses and requires the [catch2](https://github.com/catchorg/Catch2) framework for testing and [xtensor](https://github.com/xtensor-stack/xtensor) plus [xtensor-blas](https://github.com/xtensor-stack/xtensor-blas) for the cpp tensor representations.
+Those are pinned in [`environment.yml`](../environment.yml) in the repository root and are picked up from `$CONDA_PREFIX`, so that conda environment must be active when running the tests — see [`CONTRIBUTING.md`](../CONTRIBUTING.md) for the setup.
 Uses and requires [valgrind](https://valgrind.org/) for memory leak checking, can be installed via apt.
 
 Memory leaks inside a catch2 testcase are not caught by valgrind.

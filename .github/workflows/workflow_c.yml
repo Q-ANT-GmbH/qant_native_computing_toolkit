@@ -54,7 +54,7 @@ jobs:
       - name: Set up dependencies
         run: |
           apt update
-          apt install -y curl build-essential cmake patchelf gzip dpkg lintian libclang-dev clang clang-format-19
+          apt install -y curl build-essential cmake patchelf gzip dpkg lintian libclang-dev clang clang-format-19 python3
           ln -sf /usr/bin/clang-format-19 /usr/bin/clang-format
       - name: Check formatting
         shell: bash
@@ -72,7 +72,7 @@ jobs:
           version: ${{ inputs.driver_version }}
           run-id: ${{ inputs.driver_run_id }}
           token: ${{ secrets.PAT_DRIVER_REPO_READ }}
-      - uses: dtolnay/rust-toolchain@1.93.0
+      - uses: ./.github/actions/setup_rust
       - name: build library (with driver)
         if: ${{ matrix.features != 'cpu-backend' }}
         run: cargo build --release --no-default-features
@@ -80,9 +80,7 @@ jobs:
         if: ${{ matrix.features == 'cpu-backend' }}
         run: cargo build --release --no-default-features -F cpu-backend
       - name: create .deb
-        run: |
-          cargo install tomlq
-          bash ./src/c_bridge/packaging/create_deb.sh ${{ matrix.features }}
+        run: bash ./src/c_bridge/packaging/create_deb.sh ${{ matrix.features }}
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with: 
@@ -114,7 +112,7 @@ jobs:
       - uses: ./.github/actions/setup_apt
       - name: install test dependencies
         run: |
-          apt install -y git build-essential valgrind doxygen doxygen-latex graphviz
+          apt install -y git build-essential gcc-13 g++-13 valgrind doxygen-latex graphviz
       - uses: ./.github/actions/install_driver
         if: ${{ matrix.features != 'cpu-backend' }}
         with:
@@ -132,28 +130,22 @@ jobs:
         shell: bash
         run: apt install ./qant-native-computing-toolkit*.deb -y
 
-        # some C dependencies are installed into a conda environment
+        # the pinned C test and doxygen dependencies live in environment.yml
       - uses: conda-incubator/setup-miniconda@v4.0.1
         with:
           channels: conda-forge
           auto-update-conda: true
-          activate-environment: false
+          environment-file: environment.yml
+          activate-environment: qant-toolkit-dev
           miniforge-version: "latest"
-      - name: Create conda environment
-        run: |
-          conda create -n test_env python=3.12 -y 
-          conda init
-      - name: Install GCC-13 
-        shell: bash #to get source
-        run: |
-          apt install -y gcc-13 g++-13
+      - name: Initialise conda for the login shell
+        run: conda init
       - name: C memory test
         shell: bash #to get source
-        run: | 
+        run: |
           set -e
           source ~/.bashrc
-          conda activate test_env
-          conda install -y xtensor=0.25.0 xtensor-blas=0.21.0 cmake=3.31
+          conda activate qant-toolkit-dev
           cd ./tests_C/memory_tests/
           ./run_tests.sh
       - name: C unit tests
@@ -162,14 +154,18 @@ jobs:
         run: |
           set -e
           source ~/.bashrc
-          conda activate test_env
-          conda install -y catch2=3.4
+          conda activate qant-toolkit-dev
           cd ./tests_C/unit_tests/
           EXCLUDE="${{ matrix.features == 'cpu-backend' && '-E logging' || '' }}"
           ./run_tests.sh $EXCLUDE
       - name: Test docs
-        # doxyfile builds with warn as error
+        # doxyfile builds with warn as error, and expects the doxygen version
+        # pinned in environment.yml
+        shell: bash
         run: |
+          set -e
+          source ~/.bashrc
+          conda activate qant-toolkit-dev
           cd doc/doxygen/
           ./gen_doxydoc.sh
       - name: Upload docs

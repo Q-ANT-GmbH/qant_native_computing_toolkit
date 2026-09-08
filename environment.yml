@@ -1,0 +1,30 @@
+# The development environment: the Python interpreter used to build and test the
+# toolkit plus the pinned toolchain for the C/C++ tests and the Doxygen
+# documentation. Single source of truth for local development and CI, see
+# CONTRIBUTING.md and .github/workflows/workflow_c.yml.
+#
+#   conda env create -f environment.yml
+#   conda activate qant-toolkit-dev
+#
+# Python packages are not listed here. They are pinned in pyproject.toml
+# ([dependency-groups]) and pip installs them into this environment, see
+# CONTRIBUTING.md. Everything the distribution can provide (build-essential,
+# valgrind, graphviz, doxygen-latex) stays in apt.
+name: qant-toolkit-dev
+channels:
+  - conda-forge
+dependencies:
+  - pip
+  - python=3.12
+  # C/C++ test dependencies. The test CMake projects pick up their headers from
+  # $CONDA_PREFIX/include, see tests_C/*/CMakeLists.txt.
+  - catch2=3.4
+  - cmake=3.31
+  - xtensor=0.25.0
+  - xtensor-blas=0.21.0
+  # Pinned because doc/doxygen/Doxyfile is generated for a specific doxygen
+  # version (see its header) and built with WARN_AS_ERROR=YES. It is also
+  # coupled to the vendored doc/doxygen/doxygen-awesome.css theme, so the two
+  # have to be upgraded together: see doc/doxygen/README.md. This pin takes
+  # precedence over the doxygen apt pulls in with doxygen-latex.
+  - doxygen=1.17.0

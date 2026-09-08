@@ -48,9 +48,7 @@ jobs:
     - uses: ./.github/actions/setup_apt
     - name: Set up dependencies
       run: apt install -y curl build-essential libclang-dev clang jq
-    - uses: dtolnay/rust-toolchain@1.93.0
-      with:
-        components: rustfmt clippy
+    - uses: ./.github/actions/setup_rust
     - name: Check rust formatting
       run: cargo fmt --check
     - name: Lint rust

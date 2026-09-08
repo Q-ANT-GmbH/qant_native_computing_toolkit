@@ -30,7 +30,7 @@ SELF_DIR=$(dirname "$(realpath "$0")")
 RUST_ROOT=$SELF_DIR/../../..
 
 # general metadata, will be used multiple times later
-VERSION="$(tq -r -f "$RUST_ROOT/Cargo.toml" package.version)"
+VERSION="$(python3 "$RUST_ROOT/dev_tools/read_toml_version.py" "$RUST_ROOT/Cargo.toml" package)"
 EMAIL="info@qant.de"
 AUTHOR="Q.ANT GmbH"
 PKG_NAME="qant-native-computing-toolkit"

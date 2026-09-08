@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.abspath("../../../python/qant_native_computing_toolki
 project = "Q.ANT native computing toolkit"
 copyright = "2026, Q.ANT GmbH"
 author = "Q.ANT GmbH"
-release = "2.3.0"
+release = "2.3.1"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration

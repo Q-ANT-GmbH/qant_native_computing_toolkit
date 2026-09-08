@@ -1,3 +1,9 @@
+qant-native-computing-toolkit (2.3.1-0) stable; urgency=low
+
+  * Improved documentation
+
+ -- Q.ANT GmbH <info@qant.de>  Mon, 24 Aug 2026 12:00:00 +0000
+
 qant-native-computing-toolkit (2.3.0-0) stable; urgency=low
 
   * Grouping of API into categories.

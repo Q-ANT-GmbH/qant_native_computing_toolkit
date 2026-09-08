@@ -29,6 +29,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # Runners have limited disk: without this pip keeps a second copy of every
+  # wheel it downloads in its HTTP cache, which torch alone makes expensive.
+  PIP_NO_CACHE_DIR: "1"
 
 jobs:
   build_whl:
@@ -59,7 +62,7 @@ jobs:
     - uses: ./.github/actions/setup_apt
     - name: install dependencies
       run: apt install -y curl build-essential libclang-dev clang
-    - uses: dtolnay/rust-toolchain@1.93.0
+    - uses: ./.github/actions/setup_rust
     # env required by maturin
     - uses: conda-incubator/setup-miniconda@v4.0.1
       with:
@@ -77,8 +80,7 @@ jobs:
         set -e
         source ~/.bashrc
         conda activate test_env
-        pip3 install ruff
-        pip3 install toml-sort
+        pip3 install --group lint
         ruff check python/
         ruff format --check python/
         toml-sort --check pyproject.toml
@@ -96,7 +98,7 @@ jobs:
         set -e
         source ~/.bashrc
         conda activate test_env
-        pip3 install maturin
+        pip3 install --group build
         # condition && value_if_true || value_if_false
         RUST_FEATURES="${{ matrix.features != 'default' && '-F cpu-backend' || '' }}"
         maturin build $RUST_FEATURES
@@ -108,7 +110,8 @@ jobs:
         set -e
         source ~/.bashrc
         conda activate test_env
-        pip3 install .[doc]
+        # the package itself was installed by maturin develop in the previous step
+        pip3 install --group doc
         sphinx-build -M html doc/python/source/ doc/python/build/ --fail-on-warning
     - name: upload tmp wheel
       uses: actions/upload-artifact@v7
@@ -140,7 +143,7 @@ jobs:
       uses: actions/checkout@v6
       with:
         submodules: true
-    - uses: dtolnay/rust-toolchain@1.93.0
+    - uses: ./.github/actions/setup_rust
     - name: Set LIBCLANG_PATH (Windows only, required by bindgen)
       if: runner.os == 'Windows'
       shell: bash
@@ -155,7 +158,7 @@ jobs:
       shell: bash -l {0}
       run: |
         set -e
-        pip install maturin
+        pip install --group build
         maturin build -F cpu-backend
     - name: upload tmp wheel
       uses: actions/upload-artifact@v7
@@ -218,9 +221,10 @@ jobs:
           source ~/.bashrc
           conda activate test_env
           pip3 install ./qant_native_computing_toolkit*.whl
-          pip3 install pytest 
-          pip3 install mypy
-          pip3 install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+          # torch is not part of the test group and must come from the CPU index:
+          # PyPI's build bundles CUDA and fills up the runner, see pyproject.toml
+          pip3 install --group torch --index-url https://download.pytorch.org/whl/cpu
+          pip3 install --group test --group lint
       - name: Run tests
         shell: bash
         run: |
@@ -267,13 +271,14 @@ jobs:
         run: |
           set -e
           pip install ./qant_native_computing_toolkit*.whl
-          pip install pytest mypy
+          # torch is not part of the test group, see pyproject.toml.
           # macOS has no CUDA so PyPI already provides CPU-only torch; the cpu index is Linux/Windows only
           if [[ "$RUNNER_OS" == "macOS" ]]; then
-            pip install torch==2.5.1
+            pip install --group torch
           else
-            pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+            pip install --group torch --index-url https://download.pytorch.org/whl/cpu
           fi
+          pip install --group test --group lint
       - name: Run tests
         shell: bash -l {0}
         run: |

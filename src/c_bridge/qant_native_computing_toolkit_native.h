@@ -27,9 +27,10 @@ namespace qant_native_computing_toolkit::native
                                           DLManagedTensorVersioned const *vs);
 
         /**
-         * @brief Calculates a scaled periodic nonlinearity pairwise for all elements of features u and weights v.
-         * The output for each input pair is w(u,v) = f(u) * v, where f() is a 2pi - periodic function
-         * with values between -1 and 1, similar to a cosine.
+         * @brief Calculates a scaled periodic nonlinearity pairwise for all elements of features @f$u@f$ and weights @f$v@f$.
+         *
+         * The output for each input pair is @f$w(u,v) = \mathrm{tcos}(u) \cdot v@f$, where @f$\mathrm{tcos}()@f$ is a @f$2\pi@f$ - periodic function
+         * with values between @f$-1@f$ and @f$1@f$, similar to a cosine.
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
          * @param features: A 1D tensor with data type bfloat16.
@@ -62,7 +63,9 @@ namespace qant_native_computing_toolkit::native
                                                DLManagedTensorVersioned const *weights);
 
         /**
-         * @brief Multiplies two 1D Tensors of float32 element-wise. Deprecated
+         * @brief Multiplies two 1D Tensors of float32 element-wise.
+         *
+         * @deprecated Use mul_npu() with bfloat16 tensors instead.
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
          * @param us The first input tensor. Must be 1D with data type float32, same
@@ -76,7 +79,9 @@ namespace qant_native_computing_toolkit::native
                                               DLManagedTensorVersioned const *vs);
 
         /**
-         * @brief Multiplies two 1D Tensors of int16 element-wise. Deprecated.
+         * @brief Multiplies two 1D Tensors of int16 element-wise.
+         *
+         * @deprecated Use mul_npu() with bfloat16 tensors instead.
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
          * @param us The first input tensor. Must be data type int16, same

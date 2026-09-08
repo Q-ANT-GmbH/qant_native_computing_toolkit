@@ -1,0 +1,26 @@
+/*
+ * Our own overrides on top of the vendored doxygen-awesome.css theme.
+ *
+ * Keep customisations here rather than in doxygen-awesome.css: that file is
+ * vendored verbatim from upstream so it can be replaced wholesale when the theme
+ * is upgraded (see README.md). Loaded after the theme via HTML_EXTRA_STYLESHEET.
+ */
+
+/* LaTeX formulas are rendered to images (USE_MATHJAX = NO, HTML_FORMULA_FORMAT =
+ * png), so they need to be aligned with the surrounding text and inverted in
+ * dark mode, where the black glyphs would otherwise be invisible. */
+img.formulaInl {
+    vertical-align: middle;
+}
+
+@media (prefers-color-scheme: dark) {
+    html:not(.light-mode) img.formulaInl,
+    html:not(.light-mode) img.formulaDsp {
+        filter: invert(1) !important;
+    }
+}
+
+html.dark-mode img.formulaInl,
+html.dark-mode img.formulaDsp {
+    filter: invert(1) !important;
+}

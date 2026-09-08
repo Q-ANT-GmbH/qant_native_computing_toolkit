@@ -1,0 +1,8 @@
+# Single source of truth for the Rust toolchain, for local development and CI.
+# rustup reads this file and installs the channel and components below on the
+# first cargo invocation, so no manual `rustup install` / `rustup component add`
+# is needed. Keep `channel` in sync with `rust-version` in Cargo.toml.
+[toolchain]
+channel = "1.93.0"
+profile = "minimal"
+components = ["clippy", "rustfmt", "rust-analyzer"]

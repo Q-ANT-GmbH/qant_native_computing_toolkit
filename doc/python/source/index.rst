@@ -1,8 +1,7 @@
 Q.ANT native computing toolkit
 ==============================
 
-This library provides functionality relevant for scientific workloads or neural network inference on Q.ANT native processing units.
-It also acts as the user interface for the Q.ANT native computing driver, which is a required dependency.
+All you need for photonic computing.
 
 Installation
 ************
@@ -36,7 +35,6 @@ Native math functionality
 .. automodule:: qant_native_computing_toolkit.native
    :members:
    :imported-members:
-   :no-index:
 
 AI functionality
 ----------------

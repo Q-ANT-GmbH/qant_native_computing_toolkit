@@ -21,12 +21,11 @@ jobs:
       # Fail early if the tag, Cargo.toml, pyproject.toml and the changelog disagree.
       - name: Check tag, Cargo.toml, pyproject.toml and changelog versions agree
         run: |
-          cargo install tomlq
           tag_version="${GITHUB_REF_NAME#v}"
           # strip an optional _rc release-candidate postfix (e.g. _rc, _rc1) before comparing
           tag_version="${tag_version%_rc*}"
-          cargo_version=$(tq -r -f Cargo.toml package.version)
-          pyproject_version=$(tq -r -f pyproject.toml project.version)
+          cargo_version=$(python3 dev_tools/read_toml_version.py Cargo.toml package)
+          pyproject_version=$(python3 dev_tools/read_toml_version.py pyproject.toml project)
           changelog_version=$(sed -n '1s/.*(\([0-9.]*\).*/\1/p' src/c_bridge/packaging/changelog)
           echo "tag=$tag_version  Cargo.toml=$cargo_version  pyproject.toml=$pyproject_version  changelog=$changelog_version"
           if [ "$tag_version" != "$cargo_version" ] || [ "$tag_version" != "$pyproject_version" ] || [ "$tag_version" != "$changelog_version" ]; then

@@ -12,7 +12,9 @@ namespace qant_native_computing_toolkit::generic
 #endif
 
         /**
-         * @brief Initialises the Native Processing Unit. Optional, not necessary for computation.
+         * @brief Initialises the Native Processing Unit.
+         *
+         * Optional, not necessary for computation.
          *
          * @param id The identifier of the NPU to be initialised.
          *
@@ -22,6 +24,7 @@ namespace qant_native_computing_toolkit::generic
 
         /**
          * @brief Releases an NPU and frees associated memory.
+         *
          * Only relevant if multiple users want to access the same device.
          *
          * @param id The identifier of the NPU to be released.
