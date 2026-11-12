@@ -17,12 +17,12 @@ impl fmt::Display for ToolkitError {
 // our function can't fail and does not need to introduce this extra error handling
 #[allow(clippy::should_implement_trait)]
 impl ToolkitError {
-    pub fn from_str(desc: &str) -> Self {
+    pub(crate) fn from_str(desc: &str) -> Self {
         Self {
             description: String::from(desc),
         }
     }
-    pub fn from_format(args: fmt::Arguments) -> Self {
+    pub(crate) fn from_format(args: fmt::Arguments) -> Self {
         ToolkitError {
             description: args.to_string(),
         }

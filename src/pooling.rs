@@ -52,10 +52,6 @@ fn pool2d_fprop<'b>(
 ) -> Result<QantTensor4<'b>, ToolkitError> {
     let &[n_batches, data_channels, data_height, data_width] = image.shape();
 
-    if n_batches > 1 {
-        return Err(ToolkitError::from_str("does not support batched input."));
-    }
-
     let output_height =
         (data_height + 2 * attributes.padding - attributes.kernel_height) / attributes.stride + 1;
     let output_width =
@@ -71,7 +67,9 @@ fn pool2d_fprop<'b>(
     let count_include_pad = attributes.count_include_pad;
     let output_spatial = output_height * output_width;
 
-    let result_data = (0..output_channels * output_spatial)
+    // NCHW: each (batch, channel) pair is an independent plane, so `ch` indexes over
+    // n_batches * channels planes
+    let result_data = (0..n_batches * output_channels * output_spatial)
         .into_par_iter()
         .map(|p| -> Result<bf16, ToolkitError> {
             let ch = p / output_spatial;
@@ -300,15 +298,12 @@ pub fn adaptive_avgpool2d_fprop<'b>(
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        data_format_conversion::to_bf16s, global_settings::Value,
-        utils::test_utils::assert_almost_equal_vec,
-    };
+    use crate::{global_settings::Value, utils::test_utils};
 
     use super::*;
 
     fn get_default_img_data() -> Vec<Value> {
-        to_bf16s(&vec![
+        test_utils::to_bf16s(&vec![
             0.1, 0.2, 0.3, 0.4, //
             0.5, 0.6, 0.7, 0.8, //
             0.9, 1., 0.11, 0.21, //
@@ -336,8 +331,9 @@ mod tests {
         let result_avg = avgpool2d_fprop(0, &image, attributes).unwrap();
 
         // Expected output
-        let expected_data_max = to_bf16s(&vec![0.6, 0.7, 0.8, 1., 1., 0.8, 1., 1., 0.61]);
-        let expected_data_avg = to_bf16s(&vec![
+        let expected_data_max =
+            test_utils::to_bf16s(&vec![0.6, 0.7, 0.8, 1., 1., 0.8, 1., 1., 0.61]);
+        let expected_data_avg = test_utils::to_bf16s(&vec![
             0.35, 0.45, 0.55, 0.75, 0.602, 0.455, 0.655, 0.507, 0.36,
         ]);
         let expected_output_max = QantTensor4::new(expected_data_max, [1, 1, 3, 3]).unwrap();
@@ -345,10 +341,46 @@ mod tests {
 
         // Assert the results
         assert_eq!(result_max.shape(), expected_output_max.shape());
-        assert_almost_equal_vec(result_max.data(), expected_output_max.data(), 0.01);
+        test_utils::assert_almost_equal_vec(result_max.data(), expected_output_max.data(), 0.01);
 
         assert_eq!(result_avg.shape(), expected_output_avg.shape());
-        assert_almost_equal_vec(result_avg.data(), expected_output_avg.data(), 0.01);
+        test_utils::assert_almost_equal_vec(result_avg.data(), expected_output_avg.data(), 0.01);
+    }
+
+    #[test]
+    fn test_pool2d_fprop_batched() {
+        // batch of 3 images with 2 channels each
+        let base = get_default_img_data();
+        let n_planes = 3 * 2;
+        let image_data: Vec<Value> = (0..n_planes)
+            .flat_map(|p| {
+                base.iter()
+                    .map(move |&v| v * Value::from_f32(p as f32 + 1.))
+            })
+            .collect();
+        let image = QantTensor4::new(&image_data, [3, 2, 4, 4]).unwrap();
+
+        let attributes = PoolingAttributes {
+            kernel_height: 2,
+            kernel_width: 2,
+            padding: 1,
+            stride: 2,
+            count_include_pad: false,
+        };
+
+        let result_max = maxpool2d_fprop(0, &image, attributes).unwrap();
+        let result_avg = avgpool2d_fprop(0, &image, attributes).unwrap();
+        assert_eq!(result_max.shape(), &[3, 2, 3, 3]);
+        assert_eq!(result_avg.shape(), &[3, 2, 3, 3]);
+
+        // every (batch, channel) plane must equal the unbatched result of that plane
+        for p in 0..n_planes {
+            let plane = QantTensor4::new(&image_data[p * 16..(p + 1) * 16], [1, 1, 4, 4]).unwrap();
+            let expected_max = maxpool2d_fprop(0, &plane, attributes).unwrap();
+            let expected_avg = avgpool2d_fprop(0, &plane, attributes).unwrap();
+            assert_eq!(&result_max.data()[p * 9..(p + 1) * 9], expected_max.data());
+            assert_eq!(&result_avg.data()[p * 9..(p + 1) * 9], expected_avg.data());
+        }
     }
 
     #[test]
@@ -372,17 +404,17 @@ mod tests {
 
         // Expected output (max value in each pooling kernel)
         // 4x4 input with 2x2 kernels
-        let expected_data_max = to_bf16s(&vec![0.6, 0.8, 1., 0.61]);
-        let expected_data_avg = to_bf16s(&vec![0.35, 0.55, 0.655, 0.36]);
+        let expected_data_max = test_utils::to_bf16s(&vec![0.6, 0.8, 1., 0.61]);
+        let expected_data_avg = test_utils::to_bf16s(&vec![0.35, 0.55, 0.655, 0.36]);
         let expected_output_max = QantTensor4::new(expected_data_max, [1, 1, 2, 2]).unwrap();
         let expected_output_avg = QantTensor4::new(expected_data_avg, [1, 1, 2, 2]).unwrap();
 
         // Assert the results
         assert_eq!(result_max.shape(), expected_output_max.shape());
-        assert_almost_equal_vec(result_max.data(), expected_output_max.data(), 0);
+        test_utils::assert_almost_equal_vec(result_max.data(), expected_output_max.data(), 0);
 
         assert_eq!(result_avg.shape(), expected_output_avg.shape());
-        assert_almost_equal_vec(result_avg.data(), expected_output_avg.data(), 0);
+        test_utils::assert_almost_equal_vec(result_avg.data(), expected_output_avg.data(), 0);
     }
 
     #[test]
@@ -406,22 +438,22 @@ mod tests {
 
         // Expected output (max value in each pooling kernel)
         // four channels with 2x2 input with 2x2 kernels
-        let expected_data_max = to_bf16s(&vec![0.4, 0.8, 1., 0.61]);
-        let expected_data_avg = to_bf16s(&vec![0.25, 0.650, 0.555, 0.46]);
+        let expected_data_max = test_utils::to_bf16s(&vec![0.4, 0.8, 1., 0.61]);
+        let expected_data_avg = test_utils::to_bf16s(&vec![0.25, 0.650, 0.555, 0.46]);
         let expected_output_max = QantTensor4::new(expected_data_max, [1, 4, 1, 1]).unwrap();
         let expected_output_avg = QantTensor4::new(expected_data_avg, [1, 4, 1, 1]).unwrap();
 
         // Assert the results
         assert_eq!(result_max.shape(), expected_output_max.shape());
-        assert_almost_equal_vec(result_max.data(), expected_output_max.data(), 0);
+        test_utils::assert_almost_equal_vec(result_max.data(), expected_output_max.data(), 0);
 
         assert_eq!(result_avg.shape(), expected_output_avg.shape());
-        assert_almost_equal_vec(result_avg.data(), expected_output_avg.data(), 0);
+        test_utils::assert_almost_equal_vec(result_avg.data(), expected_output_avg.data(), 0);
     }
 
     // Helper: simple 2×2 image used by the padding tests below.
     fn get_simple_2x2_img_data() -> Vec<Value> {
-        to_bf16s(&[1.0, 2.0, 3.0, 4.0])
+        test_utils::to_bf16s(&[1.0, 2.0, 3.0, 4.0])
     }
 
     #[test]
@@ -451,11 +483,11 @@ mod tests {
         // (2,0) corner: 3 pad, 1 real (3.0) → 3.0/1
         // (2,1) bottom edge: 2 pad, 2 real (3,4) → 7.0/2
         // (2,2) corner: 3 pad, 1 real (4.0) → 4.0/1
-        let expected = to_bf16s(&[1.0, 1.5, 2.0, 2.0, 2.5, 3.0, 3.0, 3.5, 4.0]);
+        let expected = test_utils::to_bf16s(&[1.0, 1.5, 2.0, 2.0, 2.5, 3.0, 3.0, 3.5, 4.0]);
         let expected_out = QantTensor4::new(expected, [1, 1, 3, 3]).unwrap();
 
         assert_eq!(result.shape(), expected_out.shape());
-        assert_almost_equal_vec(result.data(), expected_out.data(), 0.01);
+        test_utils::assert_almost_equal_vec(result.data(), expected_out.data(), 0.01);
     }
 
     #[test]
@@ -479,11 +511,11 @@ mod tests {
         // (0,0): 1.0/4   (0,1): 3.0/4   (0,2): 2.0/4
         // (1,0): 4.0/4   (1,1): 10.0/4  (1,2): 6.0/4
         // (2,0): 3.0/4   (2,1): 7.0/4   (2,2): 4.0/4
-        let expected = to_bf16s(&[0.25, 0.75, 0.5, 1.0, 2.5, 1.5, 0.75, 1.75, 1.0]);
+        let expected = test_utils::to_bf16s(&[0.25, 0.75, 0.5, 1.0, 2.5, 1.5, 0.75, 1.75, 1.0]);
         let expected_out = QantTensor4::new(expected, [1, 1, 3, 3]).unwrap();
 
         assert_eq!(result.shape(), expected_out.shape());
-        assert_almost_equal_vec(result.data(), expected_out.data(), 0.01);
+        test_utils::assert_almost_equal_vec(result.data(), expected_out.data(), 0.01);
     }
 
     #[test]
@@ -506,11 +538,11 @@ mod tests {
         // (0,0): max[1]=1   (0,1): max[1,2]=2   (0,2): max[2]=2
         // (1,0): max[1,3]=3 (1,1): max[1,2,3,4]=4 (1,2): max[2,4]=4
         // (2,0): max[3]=3   (2,1): max[3,4]=4   (2,2): max[4]=4
-        let expected = to_bf16s(&[1.0, 2.0, 2.0, 3.0, 4.0, 4.0, 3.0, 4.0, 4.0]);
+        let expected = test_utils::to_bf16s(&[1.0, 2.0, 2.0, 3.0, 4.0, 4.0, 3.0, 4.0, 4.0]);
         let expected_out = QantTensor4::new(expected, [1, 1, 3, 3]).unwrap();
 
         assert_eq!(result.shape(), expected_out.shape());
-        assert_almost_equal_vec(result.data(), expected_out.data(), 0);
+        test_utils::assert_almost_equal_vec(result.data(), expected_out.data(), 0);
     }
 
     #[test]
@@ -560,17 +592,17 @@ mod tests {
         //   (2,1): 2 pad + real[3,1]=0.41, [3,2]=0.51 → max 0.51 | excl 0.46 | incl 0.23
         //   (2,2): 3 pad + real[3,3]=0.61  → max 0.61 | excl 0.61  | incl 0.61/4
         let expected_max = QantTensor4::new(
-            to_bf16s(&[0.1, 0.3, 0.4, 0.9, 1.0, 0.8, 0.31, 0.51, 0.61]),
+            test_utils::to_bf16s(&[0.1, 0.3, 0.4, 0.9, 1.0, 0.8, 0.31, 0.51, 0.61]),
             expected_shape,
         )
         .unwrap();
         let expected_avg_excl = QantTensor4::new(
-            to_bf16s(&[0.1, 0.25, 0.4, 0.7, 0.6025, 0.505, 0.31, 0.46, 0.61]),
+            test_utils::to_bf16s(&[0.1, 0.25, 0.4, 0.7, 0.6025, 0.505, 0.31, 0.46, 0.61]),
             expected_shape,
         )
         .unwrap();
         let expected_avg_incl = QantTensor4::new(
-            to_bf16s(&[
+            test_utils::to_bf16s(&[
                 0.025, 0.125, 0.1, 0.35, 0.6025, 0.2525, 0.0775, 0.23, 0.1525,
             ]),
             expected_shape,
@@ -578,13 +610,13 @@ mod tests {
         .unwrap();
 
         assert_eq!(result_max.shape(), expected_max.shape());
-        assert_almost_equal_vec(result_max.data(), expected_max.data(), 0.01);
+        test_utils::assert_almost_equal_vec(result_max.data(), expected_max.data(), 0.01);
 
         assert_eq!(result_avg_excl.shape(), expected_avg_excl.shape());
-        assert_almost_equal_vec(result_avg_excl.data(), expected_avg_excl.data(), 0.01);
+        test_utils::assert_almost_equal_vec(result_avg_excl.data(), expected_avg_excl.data(), 0.01);
 
         assert_eq!(result_avg_incl.shape(), expected_avg_incl.shape());
-        assert_almost_equal_vec(result_avg_incl.data(), expected_avg_incl.data(), 0.01);
+        test_utils::assert_almost_equal_vec(result_avg_incl.data(), expected_avg_incl.data(), 0.01);
     }
 
     #[test]
@@ -628,16 +660,16 @@ mod tests {
 
         // Expected output (max value in each pooling kernel)
         // four channels with 2x2 input with 1x1 kernels
-        let expected_data = to_bf16s(&vec![
+        let expected_data = test_utils::to_bf16s(&vec![
             0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1., 0.11, 0.21, 0.31, 0.41, 0.51, 0.61,
         ]);
         let expected_output = QantTensor4::new(expected_data, [1, 4, 2, 2]).unwrap();
 
         // Assert the results
         assert_eq!(result_max.shape(), expected_output.shape());
-        assert_almost_equal_vec(result_max.data(), expected_output.data(), 0);
+        test_utils::assert_almost_equal_vec(result_max.data(), expected_output.data(), 0);
 
         assert_eq!(result_avg.shape(), expected_output.shape());
-        assert_almost_equal_vec(result_avg.data(), expected_output.data(), 0);
+        test_utils::assert_almost_equal_vec(result_avg.data(), expected_output.data(), 0);
     }
 }

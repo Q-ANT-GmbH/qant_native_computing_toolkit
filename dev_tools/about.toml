@@ -7,3 +7,6 @@ accepted = [
     "ISC",
     "Unicode-3.0",
 ]
+
+ignore-dev-dependencies = true
+ignore-build-dependencies = true

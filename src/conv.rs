@@ -1,9 +1,8 @@
 use std::num::NonZeroUsize;
 
-use crate::data_format_conversion::to_bf16;
 use crate::data_structures::QantTensor2;
 use crate::global_settings::Value;
-use crate::memory_management::{QantMemoryHandle, mul_matrix_vec_batched_mem};
+use crate::memory_management::{self, QantMemoryHandle};
 use crate::qant_driver_import::QantDataRole;
 use crate::toolkit_error;
 use crate::{
@@ -13,9 +12,9 @@ use crate::{
 
 #[derive(Clone, Copy)]
 pub struct ConvAttributes {
-    pub padding: usize,
-    pub stride: NonZeroUsize,
-    pub dilation: usize,
+    pub(crate) padding: usize,
+    pub(crate) stride: NonZeroUsize,
+    pub(crate) dilation: usize,
 }
 
 impl ConvAttributes {
@@ -31,10 +30,10 @@ impl ConvAttributes {
 
 #[derive(Clone, Copy)]
 pub struct ConvTransposeAttributes {
-    pub padding: usize,
-    pub stride: NonZeroUsize,
-    pub dilation: usize,
-    pub output_padding: usize,
+    pub(crate) padding: usize,
+    pub(crate) stride: NonZeroUsize,
+    pub(crate) dilation: usize,
+    pub(crate) output_padding: usize,
 }
 
 impl ConvTransposeAttributes {
@@ -240,10 +239,6 @@ pub fn conv_transpose_fprop_preloaded_weights<'b>(
             "in_channels in features ({features_channels}) != in_channels in weights ({in_channels})",
         ));
     }
-    if n_batches > 1 {
-        return Err(ToolkitError::from_str("does not support batched input."));
-    }
-
     let stride = attributes.stride.get();
     // Output size for conv-transpose
     let output_height = (features_height - 1) * stride - 2 * attributes.padding
@@ -308,7 +303,7 @@ fn mul_weights_with_patches<'b>(
         out_channels,
         QantDataRole::Features,
     )?;
-    mul_matrix_vec_batched_mem(weights, &patches_handle, &result_handle)?;
+    memory_management::mul_matrix_vec_batched_mem(weights, &patches_handle, &result_handle)?;
     let result_data = result_handle.download()?;
 
     // the patches are used as a vector batch, so the result has the structure:
@@ -356,7 +351,7 @@ fn im2row<'b>(
 
     // With this pattern, we do not write zeros to every position first.
     // As we are overwriting every value, this is not required
-    let mut mat_data = vec![to_bf16(0.0); mat_data_size];
+    let mut mat_data = vec![Value::ZERO; mat_data_size];
 
     for i in 0..mat_data.len() {
         let batch_id = i / per_batch_size;
@@ -383,7 +378,7 @@ fn im2row<'b>(
         let val = if valid_pos {
             features.data()[chl_pos_in + h as usize * features_width + w as usize]
         } else {
-            to_bf16(0.0)
+            Value::ZERO
         };
 
         // row major
@@ -425,12 +420,12 @@ fn im2row_transpose<'b>(
         + 1;
     let kernels_per_in_chl = output_width * output_height;
     let k_dim = features_channels * kernel_pixel_num;
-    let per_batch_size = output_width * output_height;
-    let m_dim = per_batch_size * n_batches;
-    let mut mat_data = vec![to_bf16(0.0); k_dim * m_dim];
+    let m_dim = output_width * output_height;
+    let per_batch_size = m_dim * k_dim;
+    let mut mat_data = vec![Value::ZERO; per_batch_size * n_batches];
 
     for i in 0..mat_data.len() {
-        let batch_id = i / (per_batch_size * k_dim);
+        let batch_id = i / per_batch_size;
         let cin = (i / kernel_pixel_num) % features_channels;
         let kx = i % kernel_size.width;
         let ky = (i / kernel_size.width) % kernel_size.height;
@@ -465,16 +460,16 @@ fn im2row_transpose<'b>(
                     + feat_x]
             } else {
                 // Zero padding
-                to_bf16(0.0)
+                Value::ZERO
             }
         } else {
             // Zero padding
-            to_bf16(0.0)
+            Value::ZERO
         };
 
         let row = oy * output_width + ox;
         let col_offset = cin * kernel_pixel_num + ky * kernel_size.width + kx;
-        mat_data[row * k_dim + col_offset] = val;
+        mat_data[batch_id * per_batch_size + row * k_dim + col_offset] = val;
     }
 
     let mat_tensor = QantTensor3::new(mat_data, [n_batches, m_dim, k_dim])?;
@@ -512,7 +507,8 @@ fn nhwc_to_nchw(
 
 #[cfg(test)]
 mod tests {
-    use crate::{data_format_conversion::to_bf16s, utils::test_utils::assert_almost_equal_vec};
+    use crate::utils::test_utils;
+    use half::bf16;
 
     use super::*;
 
@@ -521,13 +517,13 @@ mod tests {
         // 0.5, 0.6, 0.7, 0.8
         // 0.9, 1., 0.11, 0.21
         // 0.31, 0.41, 0.51, 0.61
-        let features_data = to_bf16s(&vec![
+        let features_data = test_utils::to_bf16s(&vec![
             0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1., 0.11, 0.21, 0.31, 0.41, 0.51, 0.61,
         ]);
         QantTensor4::new(features_data, [1, 1, 4, 4]).unwrap()
     }
     fn get_features_1_3_4_4<'a>() -> QantTensor4<'a> {
-        let features_data = to_bf16s(&vec![
+        let features_data = test_utils::to_bf16s(&vec![
             0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1., 0.11, 0.21, 0.31, 0.41, 0.51,
             0.61, //
             0.101, 0.201, 0.301, 0.401, 0.501, 0.601, 0.701, 0.801, 0.901, 1.001, 0.111, 0.211,
@@ -539,7 +535,7 @@ mod tests {
     }
 
     fn get_features_1_3_5_4<'a>() -> QantTensor4<'a> {
-        let features_data = to_bf16s(&vec![
+        let features_data = test_utils::to_bf16s(&vec![
             0., 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1, 0.11, 0.12, 0.13, 0.14,
             0.15, 0.16, 0.17, 0.18, 0.19, 0.2, 0.21, 0.220, 0.23, 0.24, 0.25, 0.26, 0.27, 0.28,
             0.29, 0.3, 0.310, 0.320, 0.330, 0.340, 0.350, 0.360, 0.370, 0.380, 0.390, 0.4, 0.410,
@@ -556,7 +552,7 @@ mod tests {
 
         // Create weights
         let weights_data = vec![1, 0, 0, 0];
-        let weights = QantTensor4::new(to_bf16s(&weights_data), [1, 1, 2, 2]).unwrap();
+        let weights = QantTensor4::new(test_utils::to_bf16s(&weights_data), [1, 1, 2, 2]).unwrap();
 
         // Set convolution attributes
         let attributes = ConvAttributes::new(0, 1, 1).unwrap();
@@ -566,11 +562,12 @@ mod tests {
 
         // Expected output
         let expected_data = vec![0.1, 0.2, 0.3, 0.5, 0.6, 0.7, 0.9, 1., 0.110];
-        let expected_output = QantTensor4::new(to_bf16s(&expected_data), [1, 1, 3, 3]).unwrap();
+        let expected_output =
+            QantTensor4::new(test_utils::to_bf16s(&expected_data), [1, 1, 3, 3]).unwrap();
 
         // Assert the results
         assert_eq!(result.shape(), expected_output.shape());
-        assert_almost_equal_vec(result.data(), expected_output.data(), 0.02);
+        test_utils::assert_almost_equal_vec(result.data(), expected_output.data(), 0.02);
     }
 
     #[test]
@@ -579,7 +576,7 @@ mod tests {
 
         // Create weights
         let weights_data = vec![1., 0., 0., 1.];
-        let weights = QantTensor4::new(to_bf16s(&weights_data), [1, 1, 2, 2]).unwrap();
+        let weights = QantTensor4::new(test_utils::to_bf16s(&weights_data), [1, 1, 2, 2]).unwrap();
 
         // Set convolution attributes
         let attributes = ConvAttributes::new(0, 1, 1).unwrap();
@@ -589,11 +586,12 @@ mod tests {
 
         // Expected output
         let expected_data = vec![0.7, 0.9, 1.1, 1.5, 0.71, 0.91, 1.31, 1.51, 0.72];
-        let expected_output = QantTensor4::new(to_bf16s(&expected_data), [1, 1, 3, 3]).unwrap();
+        let expected_output =
+            QantTensor4::new(test_utils::to_bf16s(&expected_data), [1, 1, 3, 3]).unwrap();
 
         // Assert the results
         assert_eq!(result.shape(), expected_output.shape());
-        assert_almost_equal_vec(result.data(), expected_output.data(), 0.02);
+        test_utils::assert_almost_equal_vec(result.data(), expected_output.data(), 0.02);
     }
 
     #[test]
@@ -601,7 +599,7 @@ mod tests {
         let features = get_features_1_1_4_4();
 
         // Create weights
-        let weights_data = to_bf16s(&vec![1., 0., 0., 1.]);
+        let weights_data = test_utils::to_bf16s(&vec![1., 0., 0., 1.]);
         let weights = QantTensor4::new(&weights_data, [1, 1, 2, 2]).unwrap();
 
         // Set convolution attributes
@@ -611,7 +609,7 @@ mod tests {
         let result = conv_fprop(0, &features, &weights, attributes).unwrap();
 
         // Expected output
-        let expected_data = to_bf16s(&vec![
+        let expected_data = test_utils::to_bf16s(&vec![
             0.1, 0.2, 0.3, 0.4, 0., 0.5, 0.7, 0.9, 1.1, 0.4, 0.9, 1.5, 0.71, 0.91, 0.8, 0.31, 1.31,
             1.51, 0.72, 0.21, 0., 0.31, 0.41, 0.51, 0.61,
         ]);
@@ -619,7 +617,7 @@ mod tests {
 
         // Assert the results
         assert_eq!(result.shape(), expected_output.shape());
-        assert_almost_equal_vec(result.data(), expected_output.data(), 0.02);
+        test_utils::assert_almost_equal_vec(result.data(), expected_output.data(), 0.02);
     }
 
     #[test]
@@ -628,7 +626,7 @@ mod tests {
         let features = get_features_1_3_4_4();
 
         // Create weights
-        let weights_data = to_bf16s(&vec![
+        let weights_data = test_utils::to_bf16s(&vec![
             1., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., // -
             0., 0., 0., 0., 1., 0., 0., 1., 0., 0., 0., 0., // -
             0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 1., // -
@@ -643,7 +641,7 @@ mod tests {
         let result = conv_fprop(0, &features, &weights, attributes).unwrap();
 
         // Expected output
-        let expected_data = to_bf16s(&vec![
+        let expected_data = test_utils::to_bf16s(&vec![
             0.7, 0.9, 1.100, 1.500, 0.710, 0.910, 1.310, 1.510, 0.720, // -
             0.702, 0.902, 1.102, 1.502, 0.712, 0.912, 1.312, 1.512, 0.722, // -
             0.704, 0.904, 1.104, 1.504, 0.714, 0.914, 1.314, 1.514, 0.724, // -
@@ -653,7 +651,7 @@ mod tests {
 
         // Assert the results
         assert_eq!(result.shape(), expected_output.shape());
-        assert_almost_equal_vec(result.data(), expected_output.data(), 0.02);
+        test_utils::assert_almost_equal_vec(result.data(), expected_output.data(), 0.02);
     }
 
     #[test]
@@ -661,7 +659,7 @@ mod tests {
         let features = get_features_1_1_4_4();
 
         // Create weights
-        let weights_data = to_bf16s(&vec![1., 0., 0., 1.]);
+        let weights_data = test_utils::to_bf16s(&vec![1., 0., 0., 1.]);
         let weights = QantTensor4::new(&weights_data, [1, 1, 2, 2]).unwrap();
 
         // Set convolution attributes
@@ -671,12 +669,12 @@ mod tests {
         let result = conv_fprop(0, &features, &weights, attributes).unwrap();
 
         // Expected output
-        let expected_data = to_bf16s(&vec![0.7, 1.100, 1.310, 0.720]);
+        let expected_data = test_utils::to_bf16s(&vec![0.7, 1.100, 1.310, 0.720]);
         let expected_output = QantTensor4::new(expected_data, [1, 1, 2, 2]).unwrap();
 
         // Assert the results
         assert_eq!(result.shape(), expected_output.shape());
-        assert_almost_equal_vec(result.data(), expected_output.data(), 0.02);
+        test_utils::assert_almost_equal_vec(result.data(), expected_output.data(), 0.02);
     }
 
     #[test]
@@ -684,7 +682,7 @@ mod tests {
         let features = get_features_1_3_5_4();
 
         // Create weights data (2x3x2)
-        let weights_data = to_bf16s(&vec![
+        let weights_data = test_utils::to_bf16s(&vec![
             0.1, 0., 0., 0., 0., 0., // --
             0., 0., 0., 0., 0., 0., // --
             0., 0., 0., 0., 0., 0., // --
@@ -705,12 +703,12 @@ mod tests {
 
         // Expected output data
         // Note: You'll need to calculate the expected values based on your convolution implementation
-        let expected_output = to_bf16s(&vec![
+        let expected_output = test_utils::to_bf16s(&vec![
             0., 0.001, 0.004, 0.005, 0.008, 0.009, 0.012, 0.013, 0., 0., 0., 0., 0., 0., 0., 0.,
         ]);
         assert_eq!(result.len(), expected_output.len());
 
-        assert_almost_equal_vec(result.data(), &expected_output, 0.001);
+        test_utils::assert_almost_equal_vec(result.data(), &expected_output, 0.001);
     }
 
     #[test]
@@ -719,7 +717,7 @@ mod tests {
         let features = get_features_1_3_5_4();
 
         // Create weights data (2x3x2)
-        let weights_data = to_bf16s(&vec![
+        let weights_data = test_utils::to_bf16s(&vec![
             0.1, 0.125, 0.150, 0.175, 0.2, 0.225, 0.250, 0.275, 0.3, 0.325, 0.350, 0.375, 0.4,
             0.425, 0.450, 0.475, 0.5, 0.525, //
             0.550, 0.575, 0.600, 0.625, 0.650, 0.675, 0.7, 0.725, 0.750, 0.775, 0.800, 0.825,
@@ -738,12 +736,12 @@ mod tests {
 
         // Expected output data
         // Note: You'll need to calculate the expected values based on your convolution implementation
-        let expected_output = to_bf16s(&vec![
+        let expected_output = test_utils::to_bf16s(&vec![
             1.670, 1.726, 1.895, 1.951, 2.120, 2.176, 2.345, 2.401, 3.533, 3.670, 4.082, 4.219,
             4.631, 4.768, 5.180, 5.317,
         ]);
         assert_eq!(result.len(), expected_output.len());
-        assert_almost_equal_vec(result.data(), &expected_output, 0.03);
+        test_utils::assert_almost_equal_vec(result.data(), &expected_output, 0.03);
     }
 
     #[test]
@@ -752,7 +750,7 @@ mod tests {
         let features = get_features_1_3_4_4();
 
         // Create weights in (C_in, C_out, H, W) convention
-        let weights_data = to_bf16s(&vec![
+        let weights_data = test_utils::to_bf16s(&vec![
             1., 0., 0., 1., 0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0.,
             0., // c_in=0: c_out=0,1,2,3 each (h,w)
             0., 0., 0., 0., 1., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0.,
@@ -769,7 +767,7 @@ mod tests {
         let result = conv_transpose_fprop(0, &features, &weights, attributes).unwrap();
 
         // Expected output
-        let expected_data = to_bf16s(&vec![
+        let expected_data = test_utils::to_bf16s(&vec![
             0.1, 0.2, 0.3, 0.4, 0., //--
             0.5, 0.7, 0.9, 1.100, 0.4, //--
             0.9, 1.500, 0.710, 0.910, 0.800, //--
@@ -798,7 +796,7 @@ mod tests {
 
         // Assert the results
         assert_eq!(result.shape(), expected_output.shape());
-        assert_almost_equal_vec(result.data(), expected_output.data(), 0.02);
+        test_utils::assert_almost_equal_vec(result.data(), expected_output.data(), 0.02);
     }
 
     #[test]
@@ -806,7 +804,7 @@ mod tests {
     fn test_conv_transpose_fprop_simple() {
         let features = get_features_1_3_4_4();
         // Create weights
-        let weights_data = to_bf16s(&vec![
+        let weights_data = test_utils::to_bf16s(&vec![
             1., 0., 0., 1., // c_in=0: c_out=0,1,2,3
             0., 1., 0., 1., // c_in=1: c_out=0,1,2,3
             0., 0., 1., 1., // c_in=2: c_out=0,1,2,3
@@ -820,7 +818,7 @@ mod tests {
         let result = conv_transpose_fprop(0, &features, &weights, attributes).unwrap();
 
         // Expected output
-        let expected_data = to_bf16s(&vec![
+        let expected_data = test_utils::to_bf16s(&vec![
             0.1, 0.2, 0.3, 0.4, // --
             0.5, 0.600, 0.7, 0.800, // --
             0.9, 1., 0.110, 0.210, // --
@@ -846,12 +844,12 @@ mod tests {
 
         // Assert the results
         assert_eq!(result.shape(), expected_output.shape());
-        assert_almost_equal_vec(result.data(), expected_output.data(), 0.02);
+        test_utils::assert_almost_equal_vec(result.data(), expected_output.data(), 0.02);
     }
 
     #[test]
     fn test_im2row_0() {
-        let features_data = to_bf16s(&vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        let features_data = test_utils::to_bf16s(&vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
         let features = QantTensor4::new(features_data, [1, 1, 3, 3]).unwrap();
         let kernel_size = Size {
             height: 2,
@@ -869,13 +867,13 @@ mod tests {
         let col_data = im2row(&features, kernel_size, padding, stride).unwrap();
         assert_eq!(col_data.shape().to_vec(), [1, 4, 4]);
 
-        let expected = to_bf16s(&vec![1, 2, 4, 5, 2, 3, 5, 6, 4, 5, 7, 8, 5, 6, 8, 9]);
+        let expected = test_utils::to_bf16s(&vec![1, 2, 4, 5, 2, 3, 5, 6, 4, 5, 7, 8, 5, 6, 8, 9]);
         assert_eq!(col_data.data(), expected);
     }
 
     #[test]
     fn test_im2row_1() {
-        let features_data = to_bf16s(&vec![
+        let features_data = test_utils::to_bf16s(&vec![
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20, 30, 40, 50, 60, 70, 80, 90, 15, 25, 35, 45, 55, 65,
             75, 85, 95,
         ]);
@@ -896,7 +894,7 @@ mod tests {
         let col_data = im2row(&features, kernel_size, padding, stride).unwrap();
         assert_eq!(col_data.shape().to_vec(), [1, 4, 4 * 3]);
 
-        let expected = to_bf16s(&vec![
+        let expected = test_utils::to_bf16s(&vec![
             1, 2, 4, 5, 10, 20, 40, 50, 15, 25, 45, 55, 2, 3, 5, 6, 20, 30, 50, 60, 25, 35, 55, 65,
             4, 5, 7, 8, 40, 50, 70, 80, 45, 55, 75, 85, 5, 6, 8, 9, 50, 60, 80, 90, 55, 65, 85, 95,
         ]);
@@ -922,7 +920,7 @@ mod tests {
         let col_data = im2row(&features, kernel_size, padding, stride).unwrap();
         assert_eq!(col_data.shape().to_vec(), [1, 9, 4 * 3]);
 
-        let expected = to_bf16s(&vec![
+        let expected = test_utils::to_bf16s(&vec![
             0.1, 0.2, 0.5, 0.6, 0.101, 0.201, 0.501, 0.601, 0.102, 0.202, 0.502, 0.602, 0.2, 0.3,
             0.6, 0.7, 0.201, 0.301, 0.601, 0.701, 0.202, 0.302, 0.602, 0.702, 0.3, 0.4, 0.7, 0.8,
             0.301, 0.401, 0.701, 0.801, 0.302, 0.402, 0.702, 0.802, 0.5, 0.6, 0.9, 1., 0.501,
@@ -937,7 +935,7 @@ mod tests {
     }
     #[test]
     fn test_im2row_batched() {
-        let features_data = to_bf16s(&vec![
+        let features_data = test_utils::to_bf16s(&vec![
             100, 200, 300, 101, 201, 301, 102, 202, 302, 103, 203, 303,
         ]);
         let features = QantTensor4::new(features_data, [4, 3, 1, 1]).unwrap();
@@ -957,7 +955,7 @@ mod tests {
         let col_data = im2row(&features, kernel_size, padding, stride).unwrap();
         assert_eq!(col_data.shape().to_vec(), [4, 1, 3]);
 
-        let expected = to_bf16s(&vec![
+        let expected = test_utils::to_bf16s(&vec![
             100, 200, 300, 101, 201, 301, 102, 202, 302, 103, 203, 303,
         ]);
         assert_eq!(col_data.data(), expected);
@@ -965,7 +963,7 @@ mod tests {
 
     #[test]
     fn test_im2row_batched_2() {
-        let features_data = to_bf16s(&vec![
+        let features_data = test_utils::to_bf16s(&vec![
             0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1., 0.11, 0.21, 0.31, 0.41, 0.51,
             0.61, // --
             0.101, 0.201, 0.301, 0.401, 0.501, 0.601, 0.701, 0.801, 0.901, 1.001, 0.111, 0.211,
@@ -989,7 +987,7 @@ mod tests {
 
         let col_data = im2row(&features, kernel_size, padding, stride).unwrap();
         assert_eq!(col_data.shape().to_vec(), [3, 9, 4]);
-        let expected = to_bf16s(&vec![
+        let expected = test_utils::to_bf16s(&vec![
             0.1, 0.2, 0.5, 0.6, 0.2, 0.3, 0.6, 0.7, 0.3, 0.4, 0.7, 0.8, 0.5, 0.6, 0.9, 1., 0.6,
             0.7, 1., 0.11, 0.7, 0.8, 0.11, 0.21, 0.9, 1., 0.31, 0.41, 1., 0.11, 0.41, 0.51, 0.11,
             0.21, 0.51, 0.61, 0.101, 0.201, 0.501, 0.601, 0.201, 0.301, 0.601, 0.701, 0.301, 0.401,
@@ -1004,6 +1002,83 @@ mod tests {
     }
 
     #[test]
+    fn test_im2row_transpose_batched() {
+        let single = get_features_1_3_4_4();
+        let features_data: Vec<Value> = single
+            .data()
+            .iter()
+            .copied()
+            .chain(single.data().iter().map(|&v| v * bf16::from_f32(2.)))
+            .collect();
+        let features = QantTensor4::new(&features_data, [2, 3, 4, 4]).unwrap();
+        let kernel_size = || Size {
+            height: 2,
+            width: 2,
+        };
+        let padding = || Size {
+            height: 1,
+            width: 1,
+        };
+        let stride = || Size {
+            height: 2,
+            width: 2,
+        };
+
+        let batched = im2row_transpose(&features, kernel_size(), padding(), stride()).unwrap();
+        let &[n_batches, m_dim, k_dim] = batched.shape();
+        assert_eq!(n_batches, 2);
+        let per_batch = m_dim * k_dim;
+
+        // every batch must equal the unbatched patches of that batch
+        for b in 0..2 {
+            let single =
+                QantTensor4::new(&features_data[b * 48..(b + 1) * 48], [1, 3, 4, 4]).unwrap();
+            let expected = im2row_transpose(&single, kernel_size(), padding(), stride()).unwrap();
+            assert_eq!(expected.shape(), &[1, m_dim, k_dim]);
+            assert_eq!(
+                &batched.data()[b * per_batch..(b + 1) * per_batch],
+                expected.data()
+            );
+        }
+    }
+
+    #[test]
+    fn test_conv_transpose_fprop_batched() {
+        let single = get_features_1_3_4_4();
+        let features_data: Vec<Value> = single
+            .data()
+            .iter()
+            .copied()
+            .chain(single.data().iter().map(|&v| v * bf16::from_f32(0.5)))
+            .collect();
+        let features = QantTensor4::new(&features_data, [2, 3, 4, 4]).unwrap();
+
+        let weights_data = test_utils::to_bf16s(&vec![
+            1., 0., 0., 1., 0.5, 0., 0., 0., 0., 0.25, 0., 0., 1., 0., 0., 0., //
+            0., 0., 0., 0., 1., 0., 0., 1., 0., 0., 0., 0., 0., 1., 0., 0., //
+            0., 0., 0., 0., 0., 0., 0., 0., 1., 0., 0., 1., 0., 0., 1., 0.,
+        ]);
+        let weights = QantTensor4::new(&weights_data, [3, 4, 2, 2]).unwrap();
+        let attributes = ConvTransposeAttributes::new(0, 1, 1, 0).unwrap();
+
+        let result = conv_transpose_fprop(0, &features, &weights, attributes).unwrap();
+        assert_eq!(result.shape(), &[2, 4, 5, 5]);
+
+        // every batch must equal the unbatched result of that batch
+        let per_batch = 4 * 5 * 5;
+        for b in 0..2 {
+            let single =
+                QantTensor4::new(&features_data[b * 48..(b + 1) * 48], [1, 3, 4, 4]).unwrap();
+            let expected = conv_transpose_fprop(0, &single, &weights, attributes).unwrap();
+            test_utils::assert_almost_equal_vec(
+                &result.data()[b * per_batch..(b + 1) * per_batch],
+                expected.data(),
+                0.02,
+            );
+        }
+    }
+
+    #[test]
     fn test_attributes_reject_zero_stride() {
         assert!(ConvAttributes::new(0, 0, 1).is_err());
         assert!(ConvTransposeAttributes::new(0, 0, 1, 0).is_err());
@@ -1011,7 +1086,11 @@ mod tests {
 
     #[test]
     fn test_upload_conv_weights_metadata() {
-        let weights = QantTensor4::new(to_bf16s(&vec![0.5; 1 * 2 * 3 * 4]), [1, 2, 3, 4]).unwrap();
+        let weights = QantTensor4::new(
+            test_utils::to_bf16s(&vec![0.5; 1 * 2 * 3 * 4]),
+            [1, 2, 3, 4],
+        )
+        .unwrap();
         let weights_handle = upload_conv_weights(0, &weights).unwrap();
         assert_eq!(weights_handle.npu_id(), 0);
         assert_eq!(weights_handle.shape(), [1, 2, 3, 4]);
@@ -1019,7 +1098,11 @@ mod tests {
 
     #[test]
     fn test_upload_conv_transpose_weights_metadata() {
-        let weights = QantTensor4::new(to_bf16s(&vec![0.5; 1 * 2 * 3 * 4]), [1, 2, 3, 4]).unwrap();
+        let weights = QantTensor4::new(
+            test_utils::to_bf16s(&vec![0.5; 1 * 2 * 3 * 4]),
+            [1, 2, 3, 4],
+        )
+        .unwrap();
         let weights_handle = upload_conv_transpose_weights(0, &weights).unwrap();
         assert_eq!(weights_handle.npu_id(), 0);
         assert_eq!(weights_handle.shape(), [1, 2, 3, 4]);

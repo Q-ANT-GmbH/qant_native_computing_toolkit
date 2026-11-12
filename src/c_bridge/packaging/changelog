@@ -1,3 +1,9 @@
+qant-native-computing-toolkit (2.4.1-0) stable; urgency=low
+
+  * Bugfixes for batched inputs in conv_transpose, batchnorm, pooling and softmax.
+
+ -- Q.ANT GmbH <info@qant.de>  Thu, 12 Nov 2026 12:00:00 +0000
+
 qant-native-computing-toolkit (2.4.0-0) stable; urgency=low
 
   * Added memory management.

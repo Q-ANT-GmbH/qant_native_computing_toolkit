@@ -15,7 +15,10 @@ channels:
   - conda-forge
 dependencies:
   - pip
-  - python=3.12
+  # Oldest supported Python version, matching abi3-py311 in Cargo.toml and
+  # BUILD_PYTHON in .github/workflows/workflow_python.yml. CI tests the wheel
+  # on 3.12, 3.13 and 3.14 as well.
+  - python=3.11
   # C/C++ test dependencies. The test CMake projects pick up their headers from
   # $CONDA_PREFIX/include, see tests_C/*/CMakeLists.txt.
   - catch2=3.4

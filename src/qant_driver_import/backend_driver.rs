@@ -3,7 +3,7 @@ use crate::qant_driver_import::{
     QantDriverHandle,
 };
 use half::bf16;
-use libc::c_char;
+use std::ffi::c_char;
 
 #[link(name = "qant_native_computing_driver")]
 unsafe extern "C" {

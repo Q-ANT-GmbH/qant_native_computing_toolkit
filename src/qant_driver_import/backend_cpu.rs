@@ -14,9 +14,9 @@ use crate::qant_driver_import::{
     QantDriverHandle, QantVersionInfo, SensorInfo,
 };
 use half::bf16;
-use libc::c_char;
 use num_traits::Float;
 use std::collections::BTreeMap;
+use std::ffi::c_char;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 

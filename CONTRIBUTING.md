@@ -145,6 +145,12 @@ Building the docs:
 sphinx-build -M html doc/python/source/ doc/python/build/ --fail-on-warning
 ```
 
+### Supported Python versions
+
+The extension is built against CPython's stable ABI ("abi3", enabled by the pyo3 feature `abi3-py311` in [`Cargo.toml`](Cargo.toml)). One wheel per OS and variant, tagged `cp311-abi3`, therefore runs on every CPython >= 3.11. CI builds it once with the oldest supported version (`BUILD_PYTHON` in [`workflow_python.yml`](.github/workflows/workflow_python.yml)) and runs the tests with that wheel on every supported version.
+
+Because of abi3, any build that includes the Python bridge (the default features, e.g. plain `cargo build` or `cargo clippy --all-features`) needs a Python >= 3.11 interpreter, so activate the conda environment or set `PYO3_PYTHON`.
+
 ## C / C++
 
 ```sh

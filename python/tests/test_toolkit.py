@@ -318,6 +318,9 @@ def test_conv_fprop_preloaded_weights_consecutive(
         ((1, 10, 3, 3), (10, 20, 2, 2), 0, 1.0, 0, 3, 1, {"rtol": 0.05}),
         ((1, 10, 3, 3), (10, 20, 2, 1), 0, 1.0, 0, 3, 1, {"rtol": 0.05}),
         ((1, 10, 3, 3), (10, 20, 1, 2), 0, 1.0, 0, 3, 1, {"rtol": 0.05}),
+        ((3, 10, 1, 1), (10, 20, 1, 1), 0, 1.0, 0, 1, 1, {"rtol": 0.05}),
+        ((3, 10, 3, 3), (10, 20, 2, 2), 0, 1.0, 0, 2, 1, {"rtol": 0.05}),
+        ((2, 10, 3, 4), (10, 20, 2, 1), 0, 1.0, 0, 3, 1, {"rtol": 0.05}),
     ],
 )
 def test_conv_transpose_fprop(
@@ -378,6 +381,9 @@ def test_conv_transpose_fprop(
         ((1, 10, 3, 3), (10, 20, 2, 2), 0, 1.0, 0, 3, 1, {"rtol": 0.05}),
         ((1, 10, 3, 3), (10, 20, 2, 1), 0, 1.0, 0, 3, 1, {"rtol": 0.05}),
         ((1, 10, 3, 3), (10, 20, 1, 2), 0, 1.0, 0, 3, 1, {"rtol": 0.05}),
+        ((3, 10, 1, 1), (10, 20, 1, 1), 0, 1.0, 0, 1, 1, {"rtol": 0.05}),
+        ((3, 10, 3, 3), (10, 20, 2, 2), 0, 1.0, 0, 2, 1, {"rtol": 0.05}),
+        ((2, 10, 3, 4), (10, 20, 2, 1), 0, 1.0, 0, 3, 1, {"rtol": 0.05}),
     ],
 )
 def test_conv_transpose_fprop_preloaded_weights(
@@ -417,6 +423,7 @@ def test_conv_transpose_fprop_preloaded_weights(
     [
         ((1, 10, 3, 3), (10, 20, 2, 2), 0, 1),
         ((1, 10, 3, 3), (10, 20, 1, 2), 0, 3),
+        ((3, 10, 3, 3), (10, 20, 2, 2), 0, 2),
     ],
 )
 def test_conv_transpose_fprop_preloaded_weights_consecutive(
@@ -585,7 +592,16 @@ def test_sigmoid_fprop(features_shape, rng):
 
 
 @pytest.mark.parametrize(
-    "features_shape", [(100), ((1, 100)), ((1, 1, 100)), ((1, 1, 1, 100))]
+    "features_shape",
+    [
+        (100),
+        ((1, 100)),
+        ((1, 1, 100)),
+        ((1, 1, 1, 100)),
+        ((4, 100)),
+        ((2, 3, 100)),
+        ((2, 1, 3, 10)),
+    ],
 )
 def test_softmax_fprop(features_shape, rng):
     features = rng.uniform(0, 1.0, size=features_shape).astype(bfloat16)
@@ -594,8 +610,15 @@ def test_softmax_fprop(features_shape, rng):
     assert_allclose(softmax.sum(-1), 1, rtol=0.06)
     assert np.all(softmax > 0)
 
+    res_torch = torch.nn.functional.softmax(utils.numpy2torchbfloat(features), dim=-1)
+    assert_equal(softmax.shape, res_torch.shape)
+    assert_allclose(softmax, utils.torch2numpybfloat(res_torch), rtol=0.06)
 
-@pytest.mark.parametrize("features_shape", [((100, 1, 3)), ((1, 100, 1, 3))])
+
+@pytest.mark.parametrize(
+    "features_shape",
+    [((100, 1, 3)), ((1, 100, 1, 3)), ((4, 100, 1, 3)), ((3, 10, 4, 5))],
+)
 def test_batchnorm2d_fprop(features_shape, rng):
     features = rng.uniform(0, 1.0, size=(features_shape)).astype(bfloat16)
     means = rng.uniform(0, 1.0, size=(features_shape[-3],)).astype(bfloat16)
@@ -651,6 +674,9 @@ def test_batchnorm2d_fprop(features_shape, rng):
         ((1, 100, 10, 10), (3, 3), 2, 1),
         ((1, 100, 10, 10), (3, 2), 1, 0),
         ((1, 100, 10, 10), (2, 3), 1, 0),
+        ((4, 2, 2, 2), 1, 1, 0),
+        ((3, 100, 10, 10), (3, 3), 2, 1),
+        ((2, 10, 32, 55), (3, 2), 1, 0),
     ],
 )
 def test_maxpool2d_fprop(features_shape, kernel_size, stride, padding, rng):
@@ -692,6 +718,10 @@ def test_maxpool2d_fprop(features_shape, kernel_size, stride, padding, rng):
         ((1, 100, 10, 10), (3, 3), 2, 1, True),
         ((1, 100, 10, 10), (3, 2), 1, 0, False),
         ((1, 100, 10, 10), (2, 3), 1, 0, False),
+        ((4, 2, 2, 2), 1, 1, 0, False),
+        ((3, 100, 10, 10), (3, 3), 2, 1, False),
+        ((3, 100, 10, 10), (3, 3), 2, 1, True),
+        ((2, 10, 32, 55), (3, 2), 1, 0, False),
     ],
 )
 def test_avgpool2d_fprop(
@@ -737,6 +767,8 @@ def test_avgpool2d_fprop(
         ((1, 100, 1, 1), 1),
         ((1, 100, 9, 9), (3, 3)),
         ((1, 100, 9, 9), (9, 9)),
+        ((4, 2, 2, 2), 1),
+        ((3, 100, 9, 9), (3, 3)),
     ],
 )
 def test_adaptive_maxpool2d_fprop(features_shape, output_size, rng):
@@ -768,6 +800,8 @@ def test_adaptive_maxpool2d_fprop(features_shape, output_size, rng):
         ((1, 100, 1, 1), 1),
         ((1, 100, 9, 9), (3, 3)),
         ((1, 100, 9, 9), (9, 9)),
+        ((4, 2, 2, 2), 1),
+        ((3, 100, 9, 9), (3, 3)),
     ],
 )
 def test_adaptive_avgpool2d_fprop(features_shape, output_size, rng):

@@ -1,6 +1,6 @@
 use crate::{
-    data_structures::QantTensor2, errors::ToolkitError, global_settings::Value,
-    qant_driver_import::driver_matrix_vector_mul_batched, toolkit_error,
+    data_structures::QantTensor2, errors::ToolkitError, global_settings::Value, qant_driver_import,
+    toolkit_error,
 };
 
 pub fn linear_fprop<'a, 'b>(
@@ -28,7 +28,7 @@ pub fn linear_fprop<'a, 'b>(
 }
 
 /// Multiplies a matrix m[row, column] with a vector v with batch support
-pub fn mul_mat_vec_batched(
+fn mul_mat_vec_batched(
     npu_id: u32,
     matrix: &[Value],
     n_rows: usize,
@@ -50,17 +50,15 @@ pub fn mul_mat_vec_batched(
         ));
     };
 
-    let res_batched = driver_matrix_vector_mul_batched(npu_id, matrix, vectors, n_columns)?;
+    let res_batched =
+        qant_driver_import::matrix_vector_mul_batched(npu_id, matrix, vectors, n_columns)?;
 
     Ok(res_batched)
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        data_format_conversion::to_bf16s, data_structures::QantTensor2,
-        utils::test_utils::assert_almost_equal_vec,
-    };
+    use crate::{data_structures::QantTensor2, utils::test_utils};
 
     use super::*;
 
@@ -80,16 +78,16 @@ mod tests {
         let vector = [0., 1., 0.5];
         let res = mul_mat_vec_batched(
             0,
-            &to_bf16s(matrix),
+            &test_utils::to_bf16s(matrix),
             matrix_rows,
             matrix_columns,
-            &to_bf16s(&vector),
+            &test_utils::to_bf16s(&vector),
         )
         .unwrap();
         println!("{res:?}");
-        let res_shouldbe = to_bf16s(&vec![0.35, 0.8, 1.25, 1.5]);
+        let res_shouldbe = test_utils::to_bf16s(&vec![0.35, 0.8, 1.25, 1.5]);
 
-        assert_almost_equal_vec(&res, &res_shouldbe, 0.05);
+        test_utils::assert_almost_equal_vec(&res, &res_shouldbe, 0.05);
     }
 
     #[test]
@@ -108,24 +106,24 @@ mod tests {
         let vectors = [0., 1.0, 0.5, 0.0, 1.0, 0.5, 0.5, 0.5, 0.5];
         let res = mul_mat_vec_batched(
             0,
-            &to_bf16s(&matrix),
+            &test_utils::to_bf16s(&matrix),
             matrix_rows,
             matrix_columns,
-            &to_bf16s(&vectors),
+            &test_utils::to_bf16s(&vectors),
         )
         .unwrap();
         println!("{res:?}");
-        let res_shouldbe = to_bf16s(&vec![
+        let res_shouldbe = test_utils::to_bf16s(&vec![
             0.35, 0.8, 1.25, 1.5, 0.35, 0.8, 1.25, 1.5, 0.3, 0.75, 1.2, 1.5,
         ]);
 
-        assert_almost_equal_vec(&res, &res_shouldbe, 0.05);
+        test_utils::assert_almost_equal_vec(&res, &res_shouldbe, 0.05);
     }
 
     #[test]
     fn linear_fprop_test() {
         let feature = QantTensor2::new(
-            to_bf16s(&vec![
+            test_utils::to_bf16s(&vec![
                 0., 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, //
                 0., 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9,
             ]),
@@ -134,7 +132,7 @@ mod tests {
         .unwrap();
 
         let filter = QantTensor2::new(
-            to_bf16s(&vec![
+            test_utils::to_bf16s(&vec![
                 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
                 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0., 0.1, 0.2, 0.3, 0.4, 0.5, 0.6,
                 0.7, 0.8, 0.9, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.,
@@ -143,11 +141,12 @@ mod tests {
         )
         .unwrap();
 
-        let expected = to_bf16s(&vec![4.5, 0., 2.25, 2.85, 1.2, 4.5, 0., 2.25, 2.85, 1.2]);
+        let expected =
+            test_utils::to_bf16s(&vec![4.5, 0., 2.25, 2.85, 1.2, 4.5, 0., 2.25, 2.85, 1.2]);
 
         let res = linear_fprop(0, &feature, &filter).unwrap();
 
         assert_eq!(res.shape()[1], filter.shape()[0]);
-        assert_almost_equal_vec(res.data(), &expected, 0.05);
+        test_utils::assert_almost_equal_vec(res.data(), &expected, 0.05);
     }
 }

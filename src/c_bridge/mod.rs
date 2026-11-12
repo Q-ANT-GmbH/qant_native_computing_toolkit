@@ -12,47 +12,24 @@ How to forward a function from Rust to C:
 */
 use std::{
     ffi::{CStr, c_char, c_int, c_uint},
-    ptr::null,
+    ptr,
 };
 
 use crate::{
-    bias::{
-        add_bias_for_conv2d_fprop as rust_add_bias_for_conv2d_fprop,
-        add_bias_fprop as rust_add_bias_fprop,
-    },
-    c_bridge::dlpack::{device_check, version_check},
+    bias,
     conv::{
-        ConvAttributes, ConvTransposeAttributes, ConvTransposeWeightsHandle, ConvWeightsHandle,
-        conv_fprop as rust_conv_fprop,
-        conv_fprop_preloaded_weights as rust_conv_fprop_preloaded_weights,
-        conv_transpose_fprop as rust_conv_transpose_fprop,
-        conv_transpose_fprop_preloaded_weights as rust_conv_transpose_fprop_preloaded_weights,
-        upload_conv_transpose_weights as rust_upload_conv_transpose_weights,
-        upload_conv_weights as rust_upload_conv_weights,
+        self, ConvAttributes, ConvTransposeAttributes, ConvTransposeWeightsHandle,
+        ConvWeightsHandle,
     },
     data_structures::{QantTensor, QantTensor1, QantTensor2, QantTensor4},
     errors::ToolkitError,
     global_settings::Value,
-    linear::linear_fprop as rust_linear_fprop,
-    memory_management::{
-        QantMemoryHandle, mul_matrix_vec_batched_mem as rust_mul_matrix_vec_batched_mem,
-    },
-    non_linear::{
-        relu_fprop as rust_relu_fprop, sigmoid_fprop as rust_sigmoid_fprop,
-        softmax_fprop as rust_softmax_fprop,
-    },
-    norm::batchnorm2d_fprop as rust_batchnorm2d_fprop,
-    pooling::{
-        PoolingAttributes, adaptive_avgpool2d_fprop as rust_adaptive_avgpool2d_fprop,
-        adaptive_maxpool2d_fprop as rust_adaptive_maxpool2d_fprop,
-        avgpool2d_fprop as rust_avgpool2d_fprop, maxpool2d_fprop as rust_maxpool2d_fprop,
-    },
-    qant_driver_import::{
-        self, C_STRING_DEFAULT_LENGTH, PerformanceCounterInfo, QantDataRole,
-        driver_get_available_npus_ptr_based, driver_get_perf_counter, driver_reset_perf_counter,
-    },
-    setup_logging as rust_setup_logging,
-    utils::int_to_loglevel,
+    linear,
+    memory_management::{self, QantMemoryHandle},
+    non_linear, norm,
+    pooling::{self, PoolingAttributes},
+    qant_driver_import::{self, C_STRING_DEFAULT_LENGTH, PerformanceCounterInfo, QantDataRole},
+    utils,
 };
 
 mod dlpack;
@@ -74,14 +51,14 @@ pub extern "C" fn setup_logging(folder_name: *const c_char, loglevel: c_int) -> 
         }
         Ok(folder_name_str) => String::from(folder_name_str),
     };
-    let loglvl = match int_to_loglevel(loglevel) {
+    let loglvl = match utils::int_to_loglevel(loglevel) {
         Err(e) => {
             eprintln!("{e}");
             return -1;
         }
         Ok(l) => l,
     };
-    match rust_setup_logging(&folder_name_string, loglvl) {
+    match qant_driver_import::setup_logging(&folder_name_string, loglvl) {
         Err(e) => {
             eprintln!("{e}");
             -1
@@ -92,17 +69,17 @@ pub extern "C" fn setup_logging(folder_name: *const c_char, loglevel: c_int) -> 
 
 #[unsafe(no_mangle)]
 pub extern "C" fn get_driver_info(npu_id: u32, output: *mut c_char, len: usize) -> c_int {
-    qant_driver_import::driver_get_version_ptr_based(npu_id, output, len).code
+    qant_driver_import::get_version_ptr_based(npu_id, output, len).code
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn get_sensor_info(npu_id: u32) -> qant_driver_import::SensorInfo {
-    qant_driver_import::driver_get_sensor_info(npu_id)
+    qant_driver_import::get_sensor_info(npu_id)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn get_version_info(npu_id: u32) -> qant_driver_import::QantVersionInfo {
-    qant_driver_import::driver_get_version_info(npu_id)
+    qant_driver_import::get_version_info(npu_id)
 }
 
 #[unsafe(no_mangle)]
@@ -112,13 +89,14 @@ pub extern "C" fn get_available_npus(
     capacity: usize,
     out_count: *mut usize,
 ) -> c_int {
-    driver_get_available_npus_ptr_based(idxs_out, serials_out, capacity, out_count).code
+    qant_driver_import::get_available_npus_ptr_based(idxs_out, serials_out, capacity, out_count)
+        .code
 }
 
 #[unsafe(no_mangle)]
 #[allow(clippy::disallowed_macros)]
 pub extern "C" fn reset_perf_counter(npu_id: u32) -> c_int {
-    match driver_reset_perf_counter(npu_id) {
+    match qant_driver_import::reset_perf_counter(npu_id) {
         Ok(_) => 0,
         Err(e) => {
             eprintln!("{e}");
@@ -130,7 +108,7 @@ pub extern "C" fn reset_perf_counter(npu_id: u32) -> c_int {
 #[unsafe(no_mangle)]
 #[allow(clippy::disallowed_macros)]
 pub extern "C" fn get_perf_counter(npu_id: u32, out: *mut PerformanceCounterInfo) -> c_int {
-    match driver_get_perf_counter(npu_id) {
+    match qant_driver_import::get_perf_counter(npu_id) {
         Ok(c) => {
             unsafe {
                 *out = c;
@@ -164,7 +142,7 @@ where
                     {
                         eprintln!("{e}");
                     }
-                    return null();
+                    return ptr::null();
                 }
             };
             Box::into_raw(Box::new(ret))
@@ -174,7 +152,7 @@ where
             {
                 eprintln!("{e}");
             }
-            null()
+            ptr::null()
         }
     }
 }
@@ -182,12 +160,12 @@ where
 #[unsafe(no_mangle)]
 // must avoid naming conflict with driver init_npu()
 pub extern "C" fn init_npu(id: c_uint) -> c_int {
-    qant_driver_import::driver_init_npu_error_code(id)
+    qant_driver_import::init_npu_error_code(id)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn release_npu(id: c_uint) -> c_int {
-    qant_driver_import::driver_release_npu_error_code(id)
+    qant_driver_import::release_npu_error_code(id)
 }
 
 #[unsafe(no_mangle)]
@@ -227,7 +205,7 @@ fn npu_upload_fallible(
     data_dltensor_ptr: *const DLManagedTensorVersioned,
     data_role: QantDataRole,
 ) -> Result<QantMemoryHandle, ToolkitError> {
-    version_check(&[data_dltensor_ptr])?;
+    dlpack::version_check(&[data_dltensor_ptr])?;
     let matrix: QantTensor2 = dlpack::dltensor_to_qant_tensor(data_dltensor_ptr, "data")?;
     QantMemoryHandle::from_matrix(npu_id, &matrix, data_role)
 }
@@ -257,7 +235,7 @@ fn npu_upload_into_fallible(
             "got nullptr instead of *QantMemoryHandle",
         ));
     }
-    version_check(&[data_dltensor_ptr])?;
+    dlpack::version_check(&[data_dltensor_ptr])?;
     let matrix: QantTensor2 = dlpack::dltensor_to_qant_tensor(data_dltensor_ptr, "data")?;
     // borrow the handle to call upload, but don't take ownership of it
     unsafe { &*handle }.upload(&matrix)
@@ -307,11 +285,11 @@ fn linear_fprop_fallible<'a>(
         *const DLManagedTensorVersioned,
     ),
 ) -> Result<(QantTensor2<'a>, DLDevice), ToolkitError> {
-    version_check(&[features_dltensor_ptr, weights_dltensor_ptr])?;
-    let device = device_check(&[features_dltensor_ptr, weights_dltensor_ptr])?;
+    dlpack::version_check(&[features_dltensor_ptr, weights_dltensor_ptr])?;
+    let device = dlpack::device_check(&[features_dltensor_ptr, weights_dltensor_ptr])?;
     let feature_data = dlpack::dltensor_to_qant_tensor(features_dltensor_ptr, "features")?;
     let filter_data = dlpack::dltensor_to_qant_tensor(weights_dltensor_ptr, "weights")?;
-    let result = rust_linear_fprop(npu_id, &feature_data, &filter_data)?;
+    let result = linear::linear_fprop(npu_id, &feature_data, &filter_data)?;
     Ok((result, device))
 }
 
@@ -335,8 +313,8 @@ fn linear_fprop_preloaded_weights_fallible<'a>(
             "got nullptr instead of *QantMemoryHandle",
         ));
     }
-    version_check(&[features_dltensor_ptr])?;
-    let device = device_check(&[features_dltensor_ptr])?;
+    dlpack::version_check(&[features_dltensor_ptr])?;
+    let device = dlpack::device_check(&[features_dltensor_ptr])?;
     let features_data: QantTensor2 =
         dlpack::dltensor_to_qant_tensor(features_dltensor_ptr, "features")?;
     // borrow the handle, but don't take ownership of it
@@ -354,7 +332,11 @@ fn linear_fprop_preloaded_weights_fallible<'a>(
         weights_handle.rows(),
         QantDataRole::Features,
     )?;
-    rust_mul_matrix_vec_batched_mem(weights_handle, &features_handle, &result_handle)?;
+    memory_management::mul_matrix_vec_batched_mem(
+        weights_handle,
+        &features_handle,
+        &result_handle,
+    )?;
     Ok((result_handle.download()?, device))
 }
 
@@ -380,7 +362,11 @@ pub extern "C" fn linear_fprop_preloaded(
     // borrow the handles to call mul_matrix_vec_batched_mem, but don't take ownership of them
     let (features_handle, weights_handle, result_handle) =
         unsafe { (&*features_handle, &*weights_handle, &*result_handle) };
-    match rust_mul_matrix_vec_batched_mem(weights_handle, features_handle, result_handle) {
+    match memory_management::mul_matrix_vec_batched_mem(
+        weights_handle,
+        features_handle,
+        result_handle,
+    ) {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("{e}");
@@ -399,14 +385,14 @@ fn conv_fprop_fallible<'a>(
         usize,
     ),
 ) -> Result<(QantTensor4<'a>, DLDevice), ToolkitError> {
-    version_check(&[features_dltensor_ptr, weights_dltensor_ptr])?;
-    let device = device_check(&[features_dltensor_ptr, weights_dltensor_ptr])?;
+    dlpack::version_check(&[features_dltensor_ptr, weights_dltensor_ptr])?;
+    let device = dlpack::device_check(&[features_dltensor_ptr, weights_dltensor_ptr])?;
     let features_data = dlpack::dltensor_to_qant_tensor(features_dltensor_ptr, "features")?;
     let weights_data = dlpack::dltensor_to_qant_tensor(weights_dltensor_ptr, "weights")?;
 
     let conv_attrs = ConvAttributes::new(padding, stride, dilation)?;
 
-    let result = rust_conv_fprop(npu_id, &features_data, &weights_data, conv_attrs)?;
+    let result = conv::conv_fprop(npu_id, &features_data, &weights_data, conv_attrs)?;
     Ok((result, device))
 }
 
@@ -448,13 +434,13 @@ fn conv_transpose_fprop_fallible<'a>(
         usize,
     ),
 ) -> Result<(QantTensor4<'a>, DLDevice), ToolkitError> {
-    version_check(&[features_dltensor_ptr, weights_dltensor_ptr])?;
-    let device = device_check(&[features_dltensor_ptr, weights_dltensor_ptr])?;
+    dlpack::version_check(&[features_dltensor_ptr, weights_dltensor_ptr])?;
+    let device = dlpack::device_check(&[features_dltensor_ptr, weights_dltensor_ptr])?;
     let features_data = dlpack::dltensor_to_qant_tensor(features_dltensor_ptr, "features")?;
     let weights_data = dlpack::dltensor_to_qant_tensor(weights_dltensor_ptr, "weights")?;
     let conv_attrs = ConvTransposeAttributes::new(padding, stride, dilation, output_padding)?;
 
-    let result = rust_conv_transpose_fprop(npu_id, &features_data, &weights_data, conv_attrs)?;
+    let result = conv::conv_transpose_fprop(npu_id, &features_data, &weights_data, conv_attrs)?;
     Ok((result, device))
 }
 
@@ -483,10 +469,10 @@ fn upload_conv_weights_fallible(
     npu_id: u32,
     weights_dltensor_ptr: *const DLManagedTensorVersioned,
 ) -> Result<ConvWeightsHandle, ToolkitError> {
-    version_check(&[weights_dltensor_ptr])?;
+    dlpack::version_check(&[weights_dltensor_ptr])?;
     let weights_data: QantTensor4 =
         dlpack::dltensor_to_qant_tensor(weights_dltensor_ptr, "weights")?;
-    rust_upload_conv_weights(npu_id, &weights_data)
+    conv::upload_conv_weights(npu_id, &weights_data)
 }
 
 #[unsafe(no_mangle)]
@@ -523,15 +509,18 @@ fn conv_fprop_preloaded_weights_fallible<'a>(
             "got nullptr instead of *ConvWeightsHandle",
         ));
     }
-    version_check(&[features_dltensor_ptr])?;
-    let device = device_check(&[features_dltensor_ptr])?;
+    dlpack::version_check(&[features_dltensor_ptr])?;
+    let device = dlpack::device_check(&[features_dltensor_ptr])?;
     let features_data = dlpack::dltensor_to_qant_tensor(features_dltensor_ptr, "features")?;
 
     let conv_attrs = ConvAttributes::new(padding, stride, dilation)?;
 
     // borrow the handle, but don't take ownership of it
-    let result =
-        rust_conv_fprop_preloaded_weights(&features_data, unsafe { &*weights_handle }, conv_attrs)?;
+    let result = conv::conv_fprop_preloaded_weights(
+        &features_data,
+        unsafe { &*weights_handle },
+        conv_attrs,
+    )?;
     Ok((result, device))
 }
 
@@ -556,10 +545,10 @@ fn upload_conv_transpose_weights_fallible(
     npu_id: u32,
     weights_dltensor_ptr: *const DLManagedTensorVersioned,
 ) -> Result<ConvTransposeWeightsHandle, ToolkitError> {
-    version_check(&[weights_dltensor_ptr])?;
+    dlpack::version_check(&[weights_dltensor_ptr])?;
     let weights_data: QantTensor4 =
         dlpack::dltensor_to_qant_tensor(weights_dltensor_ptr, "weights")?;
-    rust_upload_conv_transpose_weights(npu_id, &weights_data)
+    conv::upload_conv_transpose_weights(npu_id, &weights_data)
 }
 
 #[unsafe(no_mangle)]
@@ -597,13 +586,13 @@ fn conv_transpose_fprop_preloaded_weights_fallible<'a>(
             "got nullptr instead of *ConvTransposeWeightsHandle",
         ));
     }
-    version_check(&[features_dltensor_ptr])?;
-    let device = device_check(&[features_dltensor_ptr])?;
+    dlpack::version_check(&[features_dltensor_ptr])?;
+    let device = dlpack::device_check(&[features_dltensor_ptr])?;
     let features_data = dlpack::dltensor_to_qant_tensor(features_dltensor_ptr, "features")?;
     let conv_attrs = ConvTransposeAttributes::new(padding, stride, dilation, output_padding)?;
 
     // borrow the handle, but don't take ownership of it
-    let result = rust_conv_transpose_fprop_preloaded_weights(
+    let result = conv::conv_transpose_fprop_preloaded_weights(
         &features_data,
         unsafe { &*weights_handle },
         conv_attrs,
@@ -637,12 +626,12 @@ fn add_bias_fprop_fallible<'a>(
         *const DLManagedTensorVersioned,
     ),
 ) -> Result<(QantTensor2<'a>, DLDevice), ToolkitError> {
-    version_check(&[features_dltensor_ptr, bias_dltensor_ptr])?;
-    let device = device_check(&[features_dltensor_ptr, bias_dltensor_ptr])?;
+    dlpack::version_check(&[features_dltensor_ptr, bias_dltensor_ptr])?;
+    let device = dlpack::device_check(&[features_dltensor_ptr, bias_dltensor_ptr])?;
     let feature_fdata = dlpack::dltensor_to_qant_tensor(features_dltensor_ptr, "features")?;
     let bias_fdata = dlpack::dltensor_to_qant_tensor(bias_dltensor_ptr, "bias")?;
 
-    let ret = rust_add_bias_fprop(npu_id, &feature_fdata, &bias_fdata)?;
+    let ret = bias::add_bias_fprop(npu_id, &feature_fdata, &bias_fdata)?;
 
     Ok((ret, device))
 }
@@ -663,12 +652,12 @@ fn add_bias_for_conv2d_fprop_fallible<'a>(
         *const DLManagedTensorVersioned,
     ),
 ) -> Result<(QantTensor4<'a>, DLDevice), ToolkitError> {
-    version_check(&[features_dltensor_ptr, bias_dltensor_ptr])?;
-    let device = device_check(&[features_dltensor_ptr, bias_dltensor_ptr])?;
+    dlpack::version_check(&[features_dltensor_ptr, bias_dltensor_ptr])?;
+    let device = dlpack::device_check(&[features_dltensor_ptr, bias_dltensor_ptr])?;
     let feature_fdata = dlpack::dltensor_to_qant_tensor(features_dltensor_ptr, "features")?;
     let bias_fdata = dlpack::dltensor_to_qant_tensor(bias_dltensor_ptr, "bias")?;
 
-    let ret = rust_add_bias_for_conv2d_fprop(npu_id, &feature_fdata, &bias_fdata)?;
+    let ret = bias::add_bias_for_conv2d_fprop(npu_id, &feature_fdata, &bias_fdata)?;
 
     Ok((ret, device))
 }
@@ -693,12 +682,12 @@ fn mul_npu_fallible<'a>(
         *const DLManagedTensorVersioned,
     ),
 ) -> Result<(QantTensor1<'a>, DLDevice), ToolkitError> {
-    version_check(&[us_dltensor_ptr, vs_dltensor_ptr])?;
-    let device = device_check(&[us_dltensor_ptr, vs_dltensor_ptr])?;
+    dlpack::version_check(&[us_dltensor_ptr, vs_dltensor_ptr])?;
+    let device = dlpack::device_check(&[us_dltensor_ptr, vs_dltensor_ptr])?;
     let us_fdata = dlpack::dltensor_to_qant_tensor(us_dltensor_ptr, "us")?;
     let vs_fdata = dlpack::dltensor_to_qant_tensor(vs_dltensor_ptr, "vs")?;
 
-    let result = crate::mul_elementwise_bf16(npu_id, &us_fdata, &vs_fdata)?;
+    let result = crate::elementwise::mul(npu_id, &us_fdata, &vs_fdata)?;
     Ok((result, device))
 }
 
@@ -714,10 +703,10 @@ pub extern "C" fn mul_npu(
 fn relu_fprop_fallible<'a>(
     (npu_id, features_dltensor_ptr): (c_uint, *const DLManagedTensorVersioned),
 ) -> Result<(QantTensor1<'a>, DLDevice), ToolkitError> {
-    version_check(&[features_dltensor_ptr])?;
-    let device = device_check(&[features_dltensor_ptr])?;
+    dlpack::version_check(&[features_dltensor_ptr])?;
+    let device = dlpack::device_check(&[features_dltensor_ptr])?;
     let feature_fdata = dlpack::dltensor_to_qant_tensor(features_dltensor_ptr, "features")?;
-    Ok((rust_relu_fprop(npu_id, &feature_fdata), device))
+    Ok((non_linear::relu_fprop(npu_id, &feature_fdata), device))
 }
 
 #[unsafe(no_mangle)]
@@ -731,10 +720,10 @@ pub extern "C" fn relu_fprop(
 fn sigmoid_fprop_fallible<'a>(
     (npu_id, features_dltensor_ptr): (c_uint, *const DLManagedTensorVersioned),
 ) -> Result<(QantTensor1<'a>, DLDevice), ToolkitError> {
-    version_check(&[features_dltensor_ptr])?;
-    let device = device_check(&[features_dltensor_ptr])?;
+    dlpack::version_check(&[features_dltensor_ptr])?;
+    let device = dlpack::device_check(&[features_dltensor_ptr])?;
     let feature_fdata = dlpack::dltensor_to_qant_tensor(features_dltensor_ptr, "features")?;
-    Ok((rust_sigmoid_fprop(npu_id, &feature_fdata), device))
+    Ok((non_linear::sigmoid_fprop(npu_id, &feature_fdata), device))
 }
 
 #[unsafe(no_mangle)]
@@ -748,10 +737,10 @@ pub extern "C" fn sigmoid_fprop(
 fn softmax_fprop_fallible<'a>(
     (npu_id, features_dltensor_ptr): (c_uint, *const DLManagedTensorVersioned),
 ) -> Result<(QantTensor2<'a>, DLDevice), ToolkitError> {
-    version_check(&[features_dltensor_ptr])?;
-    let device = device_check(&[features_dltensor_ptr])?;
+    dlpack::version_check(&[features_dltensor_ptr])?;
+    let device = dlpack::device_check(&[features_dltensor_ptr])?;
     let feature_fdata = dlpack::dltensor_to_qant_tensor(features_dltensor_ptr, "features")?;
-    let result = rust_softmax_fprop(npu_id, &feature_fdata)?;
+    let result = non_linear::softmax_fprop(npu_id, &feature_fdata)?;
     Ok((result, device))
 }
 
@@ -782,21 +771,21 @@ fn batchnorm2d_fprop_fallible<'a>(
         Value,
     ),
 ) -> Result<(QantTensor4<'a>, DLDevice), ToolkitError> {
-    version_check(&[
+    dlpack::version_check(&[
         features_dltensor_ptr,
         means_dltensor_ptr,
         variances_dltensor_ptr,
         weights_dltensor_ptr,
         bias_dltensor_ptr,
     ])?;
-    let device = device_check(&[
+    let device = dlpack::device_check(&[
         features_dltensor_ptr,
         means_dltensor_ptr,
         variances_dltensor_ptr,
         weights_dltensor_ptr,
         bias_dltensor_ptr,
     ])?;
-    let result = rust_batchnorm2d_fprop(
+    let result = norm::batchnorm2d_fprop(
         npu_id,
         &dlpack::dltensor_to_qant_tensor(features_dltensor_ptr, "features")?,
         &dlpack::dltensor_to_qant_tensor(means_dltensor_ptr, "means")?,
@@ -839,8 +828,8 @@ fn maxpool2d_fprop_fallible<'a>(
         usize,
     ),
 ) -> Result<(QantTensor4<'a>, DLDevice), ToolkitError> {
-    version_check(&[features_dltensor_ptr])?;
-    let device = device_check(&[features_dltensor_ptr])?;
+    dlpack::version_check(&[features_dltensor_ptr])?;
+    let device = dlpack::device_check(&[features_dltensor_ptr])?;
     let feature_data = dlpack::dltensor_to_qant_tensor(features_dltensor_ptr, "features")?;
 
     let pool_attrs = PoolingAttributes {
@@ -851,7 +840,7 @@ fn maxpool2d_fprop_fallible<'a>(
         count_include_pad: false,
     };
 
-    let result = rust_maxpool2d_fprop(npu_id, &feature_data, pool_attrs)?;
+    let result = pooling::maxpool2d_fprop(npu_id, &feature_data, pool_attrs)?;
     Ok((result, device))
 }
 
@@ -893,8 +882,8 @@ fn avgpool2d_fprop_fallible<'a>(
         bool,
     ),
 ) -> Result<(QantTensor4<'a>, DLDevice), ToolkitError> {
-    version_check(&[features_dltensor_ptr])?;
-    let device = device_check(&[features_dltensor_ptr])?;
+    dlpack::version_check(&[features_dltensor_ptr])?;
+    let device = dlpack::device_check(&[features_dltensor_ptr])?;
     let feature_data = dlpack::dltensor_to_qant_tensor(features_dltensor_ptr, "features")?;
 
     let pool_attrs = PoolingAttributes {
@@ -905,7 +894,7 @@ fn avgpool2d_fprop_fallible<'a>(
         count_include_pad,
     };
 
-    let result = rust_avgpool2d_fprop(npu_id, &feature_data, pool_attrs)?;
+    let result = pooling::avgpool2d_fprop(npu_id, &feature_data, pool_attrs)?;
     Ok((result, device))
 }
 
@@ -938,11 +927,12 @@ fn adaptive_maxpool2d_fprop_fallible<'a>(
         usize,
     ),
 ) -> Result<(QantTensor4<'a>, DLDevice), ToolkitError> {
-    version_check(&[features_dltensor_ptr])?;
-    let device = device_check(&[features_dltensor_ptr])?;
+    dlpack::version_check(&[features_dltensor_ptr])?;
+    let device = dlpack::device_check(&[features_dltensor_ptr])?;
     let feature_data = dlpack::dltensor_to_qant_tensor(features_dltensor_ptr, "features")?;
 
-    let result = rust_adaptive_maxpool2d_fprop(npu_id, &feature_data, output_height, output_width)?;
+    let result =
+        pooling::adaptive_maxpool2d_fprop(npu_id, &feature_data, output_height, output_width)?;
     Ok((result, device))
 }
 
@@ -969,11 +959,12 @@ fn adaptive_avgpool2d_fprop_fallible<'a>(
         usize,
     ),
 ) -> Result<(QantTensor4<'a>, DLDevice), ToolkitError> {
-    version_check(&[features_dltensor_ptr])?;
-    let device = device_check(&[features_dltensor_ptr])?;
+    dlpack::version_check(&[features_dltensor_ptr])?;
+    let device = dlpack::device_check(&[features_dltensor_ptr])?;
     let feature_data = dlpack::dltensor_to_qant_tensor(features_dltensor_ptr, "features")?;
 
-    let result = rust_adaptive_avgpool2d_fprop(npu_id, &feature_data, output_height, output_width)?;
+    let result =
+        pooling::adaptive_avgpool2d_fprop(npu_id, &feature_data, output_height, output_width)?;
     Ok((result, device))
 }
 
@@ -999,8 +990,8 @@ fn calc_scaled_periodic_nl_fallible_fprop<'a>(
         *const DLManagedTensorVersioned,
     ),
 ) -> Result<(QantTensor1<'a>, DLDevice), ToolkitError> {
-    version_check(&[features_dltensor_ptr, weights_dltensor_ptr])?;
-    let device = device_check(&[features_dltensor_ptr, weights_dltensor_ptr])?;
+    dlpack::version_check(&[features_dltensor_ptr, weights_dltensor_ptr])?;
+    let device = dlpack::device_check(&[features_dltensor_ptr, weights_dltensor_ptr])?;
     let feature_fdata = dlpack::dltensor_to_qant_tensor(features_dltensor_ptr, "features")?;
     let weights_fdata = dlpack::dltensor_to_qant_tensor(weights_dltensor_ptr, "weights")?;
 
@@ -1031,13 +1022,13 @@ fn calc_kan_layer_fallible<'a>(
         *const DLManagedTensorVersioned,
     ),
 ) -> Result<(QantTensor2<'a>, DLDevice), ToolkitError> {
-    version_check(&[
+    dlpack::version_check(&[
         features_dltensor_ptr,
         phis_mtensor_ptr,
         ampls_dltensor_ptr,
         ks_dltensor_ptr,
     ])?;
-    let device = device_check(&[
+    let device = dlpack::device_check(&[
         features_dltensor_ptr,
         phis_mtensor_ptr,
         ampls_dltensor_ptr,

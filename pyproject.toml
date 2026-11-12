@@ -10,19 +10,19 @@ build-backend = "maturin"
 # keep in sync with the maturin pin in [build-system] requires
 build = ["maturin >= 1.14, < 2.0"]
 dev = [
-  {include-group = "build"},
-  {include-group = "doc"},
-  {include-group = "lint"},
-  {include-group = "test"}
+  { include-group = "build" },
+  { include-group = "doc" },
+  { include-group = "lint" },
+  { include-group = "test" }
 ]
 doc = [
   "sphinx >= 7.0",
-  "sphinx-rtd-theme ~= 3.0.2"
+  "sphinx-rtd-theme ~= 3.1.0"
 ]
 lint = [
-  "mypy ~= 1.14.1",
-  "ruff ~= 0.9.3",
-  "toml-sort ~= 0.24.2"
+  "mypy ~= 2.4.0",
+  "ruff ~= 0.16.10",
+  "toml-sort ~= 0.25.0"
 ]
 test = ["pytest >= 8.3"]
 # The tests need torch as a reference implementation, but it is deliberately NOT
@@ -31,24 +31,28 @@ test = ["pytest >= 8.3"]
 # runners. Install it separately from the CPU index instead:
 # `pip install --group torch --index-url https://download.pytorch.org/whl/cpu`
 # On macOS there is no CUDA build, so plain `pip install --group torch` is fine.
-torch = ["torch == 2.5.1"]
+torch = ["torch == 2.14.1"]
 
 [project]
 name = "qant_native_computing_toolkit"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 classifiers = [
   "Programming Language :: Rust",
-  "Programming Language :: Python :: Implementation :: CPython",
-  "Programming Language :: Python :: Implementation :: PyPy"
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: Implementation :: CPython"
 ]
-version = "2.4.0"
+version = "2.4.1"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md", "external/dlpack/LICENSE"]
-authors = [{name = "Q.ANT GmbH", email = "info@qant.de"}]
+authors = [{ name = "Q.ANT GmbH", email = "info@qant.de" }]
 dependencies = [
   "numpy >= 1.26",
-  "cffi==1.17.1",
   "ml-dtypes >= 0.5.4"
 ]
 

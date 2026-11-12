@@ -30,6 +30,9 @@ Cargo.lock
 
 **/__pycache__
 **/*cpython*
+# extension module built by `maturin develop` (abi3)
+**/*.abi3.so
+**/*.pyd
 .venv/
 
 ## Added by Sphinx (python documentation)

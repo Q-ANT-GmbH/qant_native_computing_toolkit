@@ -507,7 +507,7 @@ def softmax_fprop(features: np.ndarray, device_id: int = 0) -> np.ndarray:
     Performs a forward pass through a `Softmax <https://en.wikipedia.org/wiki/Softmax_function>`_ layer.
 
     Args:
-        features (np.ndarray): An ND array of input features. Must be dtype=bfloat16. If multidimensional, the first dimension must be 1.
+        features (np.ndarray): An ND array of input features. Must be dtype=bfloat16. Softmax is applied along the last dimension, additional dimensions are treated as batch dimensions.
         device_id (int, optional): The identifier of the NPU on which the operation is performed.
 
     Returns:

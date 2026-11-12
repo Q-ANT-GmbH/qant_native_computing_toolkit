@@ -15,7 +15,7 @@ env:
   # 'release' (pinned by tag) or 'artifact' (pinned by run id)
   DRIVER_SOURCE: release 
   # release tag, used when DRIVER_SOURCE=release      
-  DRIVER_VERSION: v2.4.0
+  DRIVER_VERSION: v2.4.1
   # driver workflow run id, used when DRIVER_SOURCE=artifact    
   # -> https://github.com/Q-ANT-GmbH/qant_native_computing_driver/actions/runs/36992977797
   DRIVER_RUN_ID: "36992977797"

@@ -32,6 +32,10 @@ env:
   # Runners have limited disk: without this pip keeps a second copy of every
   # wheel it downloads in its HTTP cache, which torch alone makes expensive.
   PIP_NO_CACHE_DIR: "1"
+  # The wheels are abi3 (pyo3 feature abi3-py311 in Cargo.toml): one wheel per OS and
+  # variant runs on every CPython >= 3.11. Build with the oldest supported version,
+  # the test jobs below run that wheel on every supported version.
+  BUILD_PYTHON: "3.11"
 
 jobs:
   build_whl:
@@ -43,9 +47,6 @@ jobs:
         os:
         # we only need to build toolkit wheel on one distro
           - debian:13
-        python-ver:
-          - 3.12
-          - 3.13
         features: ${{ fromJSON(inputs.features) }}
       fail-fast: false
 
@@ -71,8 +72,7 @@ jobs:
         activate-environment: false
     - name: Create conda environment
       run: |
-        # use non-default python version to test compatibility
-        conda create -n test_env python=${{matrix.python-ver}} pip -y 
+        conda create -n test_env python=${{ env.BUILD_PYTHON }} pip -y
         conda init
     - name: Linting, format and type checking of python files
       shell: bash
@@ -116,11 +116,11 @@ jobs:
     - name: upload tmp wheel
       uses: actions/upload-artifact@v7
       with: 
-        name: tmp-toolkit-whl-${{matrix.python-ver}}-${{matrix.features}}
+        name: tmp-toolkit-whl-${{ matrix.features }}
         path: ./target/wheels/qant_native_computing_toolkit*.whl
         retention-days: 1
     - name: upload API documentation
-      if: matrix.python-ver == '3.12' && matrix.features == 'default'
+      if: matrix.features == 'default'
       uses: actions/upload-artifact@v7
       with: 
         name: toolkit-python-api-doc
@@ -131,8 +131,6 @@ jobs:
     strategy:
       matrix:
         os: [windows-latest, macos-latest]
-        python-ver:
-          - 3.12
         features:
           - cpu-backend
       fail-fast: false
@@ -152,7 +150,7 @@ jobs:
       with:
         channels: conda-forge
         miniforge-version: latest
-        python-version: ${{ matrix.python-ver }}
+        python-version: ${{ env.BUILD_PYTHON }}
         activate-environment: test_env
     - name: Build rust lib and python package
       shell: bash -l {0}
@@ -163,7 +161,7 @@ jobs:
     - name: upload tmp wheel
       uses: actions/upload-artifact@v7
       with:
-        name: tmp-toolkit-whl-${{ matrix.python-ver }}-${{ matrix.features }}-${{ matrix.os }}
+        name: tmp-toolkit-whl-${{ matrix.features }}-${{ matrix.os }}
         path: ./target/wheels/qant_native_computing_toolkit*.whl
         retention-days: 1
 
@@ -178,8 +176,10 @@ jobs:
           - ubuntu:24.04
           - debian:13
         python-ver:
-          - 3.12
-          - 3.13
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
         features: ${{ fromJSON(inputs.features) }}
       fail-fast: false
     container: ${{ matrix.os }}
@@ -203,7 +203,7 @@ jobs:
       - name: Download the toolkit whl
         uses: actions/download-artifact@v8
         with:
-          name: tmp-toolkit-whl-${{matrix.python-ver}}-${{matrix.features}}
+          name: tmp-toolkit-whl-${{ matrix.features }}
           path: .
       - uses: conda-incubator/setup-miniconda@v4.0.1
         with:
@@ -244,7 +244,10 @@ jobs:
       matrix:
         os: [windows-latest, macos-latest]
         python-ver:
-          - 3.12
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
         features:
           - cpu-backend
       fail-fast: false
@@ -258,7 +261,7 @@ jobs:
       - name: Download the toolkit whl
         uses: actions/download-artifact@v8
         with:
-          name: tmp-toolkit-whl-${{ matrix.python-ver }}-${{ matrix.features }}-${{ matrix.os }}
+          name: tmp-toolkit-whl-${{ matrix.features }}-${{ matrix.os }}
           path: .
       - uses: conda-incubator/setup-miniconda@v4.0.1
         with:
@@ -292,31 +295,17 @@ jobs:
     # The default (real-driver) wheels only exist on trusted runs; skip on cpu-backend-only (fork) runs.
     if: ${{ contains(fromJSON(inputs.features), 'default') }}
     steps:
-      - name: Download the (tested) toolkit whl
+      - name: Download the (tested) default wheel
         uses: actions/download-artifact@v8
         with:
-          name: tmp-toolkit-whl-3.13-default
+          name: tmp-toolkit-whl-default
           path: ./wheels/default
-      - name: Download the (tested) toolkit whl
+      - name: Download the (tested) cpu-backend wheels (Linux, Windows, macOS)
         uses: actions/download-artifact@v8
         with:
-          name: tmp-toolkit-whl-3.12-default
-          path: ./wheels/default
-      - name: Download the (tested) toolkit whl 
-        uses: actions/download-artifact@v8
-        with:
-          name: tmp-toolkit-whl-3.12-cpu-backend
+          pattern: tmp-toolkit-whl-cpu-backend*
           path: ./wheels/cpu_backend
-      - name: Download Windows cpu-backend wheel (py3.12)
-        uses: actions/download-artifact@v8
-        with:
-          name: tmp-toolkit-whl-3.12-cpu-backend-windows-latest
-          path: ./wheels/cpu_backend
-      - name: Download macOS cpu-backend wheel (py3.12)
-        uses: actions/download-artifact@v8
-        with:
-          name: tmp-toolkit-whl-3.12-cpu-backend-macos-latest
-          path: ./wheels/cpu_backend
+          merge-multiple: true
       - name: upload package persistently
         uses: actions/upload-artifact@v7
         with:

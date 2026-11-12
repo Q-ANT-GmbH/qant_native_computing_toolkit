@@ -46,7 +46,7 @@ fn get_driver_info(npu_id: u32) -> PyResult<String> {
     Ok(crate::get_driver_info(npu_id)?)
 }
 
-fn pyarray_to_slice<'py, Type: numpy::Element, Dim: ndarray::Dimension>(
+fn pyarray_to_slice<'py, Type: numpy::Element, Dim: numpy::ndarray::Dimension>(
     x: &'py PyReadonlyArray<'py, Type, Dim>,
 ) -> Result<&'py [Type], pyo3::PyErr> {
     if !x.is_c_contiguous() {
@@ -58,7 +58,7 @@ fn pyarray_to_slice<'py, Type: numpy::Element, Dim: ndarray::Dimension>(
     Ok(x.as_slice()?)
 }
 
-fn pyarray_to_qant_tensor<'py, const D: usize, DNumpy: ndarray::Dimension>(
+fn pyarray_to_qant_tensor<'py, const D: usize, DNumpy: numpy::ndarray::Dimension>(
     pyarr: &'py PyReadonlyArray<'py, Feature, DNumpy>,
 ) -> Result<QantTensor<'py, D>, pyo3::PyErr> {
     if pyarr.ndim() != D {
@@ -81,7 +81,7 @@ fn qant_tensor_to_pyarray<'py, const D: usize, DNumpy>(
     fdata: QantTensor<D>,
 ) -> PyResult<Bound<'py, PyArray<Feature, DNumpy>>>
 where
-    DNumpy: ndarray::Dimension,
+    DNumpy: numpy::ndarray::Dimension,
 {
     let dims: DNumpy = DNumpy::from_dimension(&numpy::IxDyn(fdata.shape())).ok_or_else(|| {
         exceptions::PyValueError::new_err(format!(
@@ -316,7 +316,7 @@ fn mul<'py>(
     let us_fdata = pyarray_to_qant_tensor(&us)?;
     let vs_fdata = pyarray_to_qant_tensor(&vs)?;
 
-    let res = crate::mul_elementwise_bf16(npu_id, &us_fdata, &vs_fdata)?;
+    let res = crate::elementwise::mul(npu_id, &us_fdata, &vs_fdata)?;
     qant_tensor_to_pyarray(py, res)
 }
 
@@ -474,7 +474,7 @@ fn adaptive_avgpool2d_fprop<'py>(
     qant_tensor_to_pyarray(py, res)
 }
 
-#[pyclass(name = "DataRole", eq)]
+#[pyclass(name = "DataRole", eq, from_py_object)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum PyDataRole {
     Weights,
@@ -666,14 +666,12 @@ fn get_available_npus(py: Python) -> PyResult<Bound<PyDict>> {
 
 #[pyfunction]
 fn reset_perf_counter(npu_id: u32) -> PyResult<()> {
-    Ok(crate::qant_driver_import::driver_reset_perf_counter(
-        npu_id,
-    )?)
+    Ok(crate::qant_driver_import::reset_perf_counter(npu_id)?)
 }
 
 #[pyfunction]
 fn get_perf_counter(py: Python, npu_id: u32) -> PyResult<Bound<PyDict>> {
-    let info = crate::qant_driver_import::driver_get_perf_counter(npu_id)?;
+    let info = crate::qant_driver_import::get_perf_counter(npu_id)?;
 
     let ret_dict = PyDict::new(py);
     ret_dict.set_item("timebased_counter", info.timebased_counter)?;

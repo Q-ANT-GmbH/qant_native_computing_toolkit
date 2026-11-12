@@ -1,7 +1,9 @@
-use crate::{errors::ToolkitError, toolkit_error, utils::log_level_to_int};
+use crate::{errors::ToolkitError, toolkit_error, utils};
 use half::bf16;
-use libc::{self, c_char, c_int};
-use std::{collections::HashMap, ffi::CString};
+use std::{
+    collections::HashMap,
+    ffi::{CString, c_char, c_int},
+};
 
 #[cfg_attr(feature = "cpu-backend", path = "backend_cpu.rs")]
 #[cfg_attr(not(feature = "cpu-backend"), path = "backend_driver.rs")]
@@ -109,17 +111,14 @@ fn c_char_to_rust_str(c_chars: &[c_char; C_STRING_DEFAULT_LENGTH]) -> String {
     c_str.to_string_lossy().to_string()
 }
 
-fn driver_err_to_result(err: QantDriverError) -> Result<(), ToolkitError> {
+fn err_to_result(err: QantDriverError) -> Result<(), ToolkitError> {
     if err.code == 0 {
         return Ok(());
     }
     Err(ToolkitError::from_str(&c_char_to_rust_str(&err.message)))
 }
 
-pub fn driver_setup_logging(
-    folder_name: &str,
-    loglevel: tracing::Level,
-) -> Result<(), ToolkitError> {
+pub fn setup_logging(folder_name: &str, loglevel: tracing::Level) -> Result<(), ToolkitError> {
     let folder_cstr = match CString::new(folder_name) {
         Ok(cstr) => cstr,
         Err(_) => {
@@ -128,11 +127,11 @@ pub fn driver_setup_logging(
             ));
         }
     };
-    let loglevel_int = log_level_to_int(loglevel);
+    let loglevel_int = utils::log_level_to_int(loglevel);
 
     let driver_err =
         unsafe { backend::qant_driver_setup_logging(folder_cstr.as_ptr(), loglevel_int) };
-    driver_err_to_result(driver_err)
+    err_to_result(driver_err)
 }
 
 /// Takes a c function and returns a rust function.
@@ -158,7 +157,7 @@ pub fn wrap_c_function_of_two_arrays(
         let mut res = Vec::<bf16>::with_capacity(len);
 
         let driver_err = unsafe { c_fn(id, us.as_ptr(), vs.as_ptr(), res.as_mut_ptr(), len) };
-        driver_err_to_result(driver_err)?;
+        err_to_result(driver_err)?;
 
         unsafe {
             res.set_len(len);
@@ -167,30 +166,30 @@ pub fn wrap_c_function_of_two_arrays(
     }
 }
 
-pub fn driver_init_npu(npu_id: u32) -> Result<(), ToolkitError> {
+pub fn init_npu(npu_id: u32) -> Result<(), ToolkitError> {
     let driver_err = unsafe { backend::qant_driver_init_npu(npu_id) };
-    driver_err_to_result(driver_err)
+    err_to_result(driver_err)
 }
 
-pub fn driver_release_npu(npu_id: u32) -> Result<(), ToolkitError> {
+pub fn release_npu(npu_id: u32) -> Result<(), ToolkitError> {
     let driver_err = unsafe { backend::qant_driver_release_npu(npu_id) };
-    driver_err_to_result(driver_err)
+    err_to_result(driver_err)
 }
 
-pub fn driver_init_npu_error_code(npu_id: u32) -> c_int {
+pub fn init_npu_error_code(npu_id: u32) -> c_int {
     unsafe { backend::qant_driver_init_npu(npu_id).code }
 }
 
-pub fn driver_release_npu_error_code(npu_id: u32) -> c_int {
+pub fn release_npu_error_code(npu_id: u32) -> c_int {
     unsafe { backend::qant_driver_release_npu(npu_id).code }
 }
 
-pub fn driver_mul(npu_id: u32, us: &[bf16], vs: &[bf16]) -> Result<Vec<bf16>, ToolkitError> {
+pub fn mul(npu_id: u32, us: &[bf16], vs: &[bf16]) -> Result<Vec<bf16>, ToolkitError> {
     let res = wrap_c_function_of_two_arrays(backend::qant_driver_mul_npu)(npu_id, us, vs)?;
     Ok(res)
 }
 
-pub fn driver_matrix_vector_mul_batched(
+pub fn matrix_vector_mul_batched(
     npu_id: u32,
     matrix: &[bf16],
     vector_batch: &[bf16],
@@ -223,11 +222,11 @@ pub fn driver_matrix_vector_mul_batched(
         res.set_len(n_rows * n_vecs);
     }
 
-    driver_err_to_result(driver_err)?;
+    err_to_result(driver_err)?;
     Ok(res)
 }
 
-pub fn driver_scaled_periodic_nl(
+pub fn scaled_periodic_nl(
     npu_id: u32,
     us: &[bf16],
     vs: &[bf16],
@@ -237,7 +236,7 @@ pub fn driver_scaled_periodic_nl(
     Ok(res)
 }
 
-pub fn driver_allocate(
+pub fn allocate(
     npu_id: u32,
     rows: usize,
     cols: usize,
@@ -246,31 +245,31 @@ pub fn driver_allocate(
     let mut out_handle = QantDriverHandle { npu_id, key: 0 };
     let driver_err =
         unsafe { backend::qant_driver_allocate(npu_id, rows, cols, data_role, &mut out_handle) };
-    driver_err_to_result(driver_err)?;
+    err_to_result(driver_err)?;
     Ok(out_handle)
 }
 
-pub fn driver_free(handle: QantDriverHandle) -> Result<(), ToolkitError> {
+pub fn free(handle: QantDriverHandle) -> Result<(), ToolkitError> {
     let driver_err = unsafe { backend::qant_driver_free(handle) };
-    driver_err_to_result(driver_err)
+    err_to_result(driver_err)
 }
 
-pub fn driver_upload(handle: QantDriverHandle, data: &[bf16]) -> Result<(), ToolkitError> {
+pub fn upload(handle: QantDriverHandle, data: &[bf16]) -> Result<(), ToolkitError> {
     let driver_err = unsafe { backend::qant_driver_upload(handle, data.as_ptr()) };
-    driver_err_to_result(driver_err)
+    err_to_result(driver_err)
 }
 
-pub fn driver_download(handle: QantDriverHandle, len: usize) -> Result<Vec<bf16>, ToolkitError> {
+pub fn download(handle: QantDriverHandle, len: usize) -> Result<Vec<bf16>, ToolkitError> {
     let mut data = Vec::<bf16>::with_capacity(len);
     let driver_err = unsafe { backend::qant_driver_download(handle, data.as_mut_ptr()) };
     unsafe {
         data.set_len(len);
     }
-    driver_err_to_result(driver_err)?;
+    err_to_result(driver_err)?;
     Ok(data)
 }
 
-pub fn driver_mul_matrix_vec_batched_mem(
+pub fn mul_matrix_vec_batched_mem(
     matrix_handle: QantDriverHandle,
     vector_handle: QantDriverHandle,
     output_handle: QantDriverHandle,
@@ -278,16 +277,16 @@ pub fn driver_mul_matrix_vec_batched_mem(
     let driver_err = unsafe {
         backend::qant_driver_mul_matrix_vec_batched_mem(matrix_handle, vector_handle, output_handle)
     };
-    driver_err_to_result(driver_err)
+    err_to_result(driver_err)
 }
 
-pub fn driver_get_version(npu_id: u32) -> Result<String, ToolkitError> {
+pub fn get_version(npu_id: u32) -> Result<String, ToolkitError> {
     let max_len = 512;
     let mut res = String::with_capacity(max_len);
     let driver_err = unsafe {
         backend::qant_driver_get_version(npu_id, res.as_mut_ptr() as *mut c_char, max_len)
     };
-    driver_err_to_result(driver_err)?;
+    err_to_result(driver_err)?;
     let c_str = unsafe { std::ffi::CStr::from_ptr(res.as_ptr() as *const c_char) };
     let rust_str = c_str.to_string_lossy();
 
@@ -295,17 +294,13 @@ pub fn driver_get_version(npu_id: u32) -> Result<String, ToolkitError> {
 }
 
 /// to pipe the function directly to the C/C++ interface
-pub fn driver_get_version_ptr_based(
-    npu_id: u32,
-    output: *mut c_char,
-    len: usize,
-) -> QantDriverError {
+pub fn get_version_ptr_based(npu_id: u32, output: *mut c_char, len: usize) -> QantDriverError {
     unsafe { backend::qant_driver_get_version(npu_id, output, len) }
 }
 
-pub fn driver_get_device_info(npu_id: u32) -> Result<DeviceInfo, ToolkitError> {
+pub fn get_device_info(npu_id: u32) -> Result<DeviceInfo, ToolkitError> {
     let device_info = unsafe { backend::qant_driver_get_device_info(npu_id) };
-    driver_err_to_result(device_info.error)?;
+    err_to_result(device_info.error)?;
     Ok(DeviceInfo {
         sensor: device_info.sensor_info,
         version_info: VersionInfo::from_c_struct(device_info.version_info),
@@ -314,21 +309,21 @@ pub fn driver_get_device_info(npu_id: u32) -> Result<DeviceInfo, ToolkitError> {
 
 /// Returns the sensor info
 /// just used for the direct C/C++ interface, all other functions should
-/// use the driver_get_device_info function
-pub fn driver_get_sensor_info(npu_id: u32) -> SensorInfo {
+/// use the get_device_info function
+pub fn get_sensor_info(npu_id: u32) -> SensorInfo {
     let device_info = unsafe { backend::qant_driver_get_device_info(npu_id) };
     device_info.sensor_info
 }
 
 /// Returns the version info
 /// just used for the direct C/C++ interface, all other functions should
-/// use the driver_get_device_info function
-pub fn driver_get_version_info(npu_id: u32) -> QantVersionInfo {
+/// use the get_device_info function
+pub fn get_version_info(npu_id: u32) -> QantVersionInfo {
     let device_info = unsafe { backend::qant_driver_get_device_info(npu_id) };
     device_info.version_info
 }
 
-pub fn driver_get_available_npus() -> Result<HashMap<u32, String>, ToolkitError> {
+pub fn get_available_npus() -> Result<HashMap<u32, String>, ToolkitError> {
     const MAX_N_NPUS: usize = 10;
     let mut idx_arr = [0_u32; MAX_N_NPUS];
     let mut serial_arr = [[0; C_STRING_DEFAULT_LENGTH]; MAX_N_NPUS];
@@ -341,7 +336,7 @@ pub fn driver_get_available_npus() -> Result<HashMap<u32, String>, ToolkitError>
             &mut n_npus as *mut usize,
         )
     };
-    driver_err_to_result(driver_err)?;
+    err_to_result(driver_err)?;
     let mut ret = HashMap::new();
     for i in 0..n_npus {
         ret.insert(idx_arr[i], c_char_to_rust_str(&serial_arr[i]));
@@ -350,7 +345,7 @@ pub fn driver_get_available_npus() -> Result<HashMap<u32, String>, ToolkitError>
 }
 
 /// to pipe the function directly to the C/C++ interface
-pub fn driver_get_available_npus_ptr_based(
+pub fn get_available_npus_ptr_based(
     idxs_out: *mut u32,
     serials_out: *mut [c_char; C_STRING_DEFAULT_LENGTH],
     capacity: usize,
@@ -359,13 +354,13 @@ pub fn driver_get_available_npus_ptr_based(
     unsafe { backend::qant_driver_get_available_npus(idxs_out, serials_out, capacity, out_count) }
 }
 
-pub fn driver_reset_perf_counter(npu_id: u32) -> Result<(), ToolkitError> {
+pub fn reset_perf_counter(npu_id: u32) -> Result<(), ToolkitError> {
     let driver_err = unsafe { backend::qant_driver_reset_perf_counter(npu_id) };
-    driver_err_to_result(driver_err)?;
+    err_to_result(driver_err)?;
     Ok(())
 }
 
-pub fn driver_get_perf_counter(npu_id: u32) -> Result<PerformanceCounterInfo, ToolkitError> {
+pub fn get_perf_counter(npu_id: u32) -> Result<PerformanceCounterInfo, ToolkitError> {
     let mut counter: PerformanceCounterInfo = PerformanceCounterInfo {
         timebased_counter: 0.0,
         stalling_counter: 0.0,
@@ -373,6 +368,6 @@ pub fn driver_get_perf_counter(npu_id: u32) -> Result<PerformanceCounterInfo, To
     let err = unsafe {
         backend::qant_driver_get_perf_counter(npu_id, &mut counter as *mut PerformanceCounterInfo)
     };
-    driver_err_to_result(err)?;
+    err_to_result(err)?;
     Ok(counter)
 }

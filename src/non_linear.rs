@@ -1,9 +1,9 @@
-use std::iter::repeat_n;
+use std::iter;
 
 use crate::data_structures::{QantTensor1, QantTensor2, QantTensor3};
 use crate::errors::ToolkitError;
 use crate::global_settings::Value;
-use crate::qant_driver_import::{driver_mul, driver_scaled_periodic_nl};
+use crate::qant_driver_import;
 use crate::toolkit_error;
 use half::bf16;
 use num_traits::Float;
@@ -22,16 +22,6 @@ pub fn relu_fprop<'b>(_npu_id: u32, features: &QantTensor1<'_>) -> QantTensor1<'
     // the shape check here can't fail
     #[allow(clippy::unwrap_used)]
     QantTensor1::new(data, *features.shape()).unwrap()
-}
-
-/// Applies a ReLu function to all values inplace
-/// ReLu is defined as: max(x, 0)
-pub fn relu_fprop_inplace(features: &mut QantTensor1) {
-    features
-        .data_mut()
-        .to_mut()
-        .iter_mut()
-        .for_each(|e| *e = relu(*e));
 }
 
 #[inline]
@@ -56,12 +46,20 @@ pub fn softmax_fprop<'b>(
     _npu_id: u32,
     features: &QantTensor2<'_>,
 ) -> Result<QantTensor2<'b>, ToolkitError> {
-    if features.shape()[0] > 1 {
-        return Err(ToolkitError::from_str("does not support batched input."));
+    let n_channels = features.shape()[1];
+    if n_channels == 0 {
+        return QantTensor2::new(Vec::new(), *features.shape());
     }
 
-    let sum: Value = features.data().iter().map(|&e| e.exp()).sum();
-    let data: Vec<Value> = features.data().iter().map(|&e| e.exp() / sum).collect();
+    // softmax is applied to each row (batch) separately
+    let data: Vec<Value> = features
+        .data()
+        .chunks(n_channels)
+        .flat_map(|row| {
+            let sum: Value = row.iter().map(|&e| e.exp()).sum();
+            row.iter().map(move |&e| e.exp() / sum)
+        })
+        .collect();
 
     QantTensor2::new(data, *features.shape())
 }
@@ -79,11 +77,8 @@ pub fn calc_scaled_periodic_nl<'a, 'b>(
             weights_data.shape()[0]
         ));
     }
-    let result_data = crate::qant_driver_import::driver_scaled_periodic_nl(
-        npu_id,
-        feature_data.data(),
-        weights_data.data(),
-    )?;
+    let result_data =
+        qant_driver_import::scaled_periodic_nl(npu_id, feature_data.data(), weights_data.data())?;
     QantTensor1::new(result_data, *feature_data.shape())
 }
 
@@ -170,26 +165,32 @@ pub fn calc_kan_layer<'a, 'b>(
     // xs: add k dimension in the middle by repeating the last dimension
     let xs_ikb: Vec<_> = xs_ib
         .chunks(n_batch)
-        .flat_map(|chunk| repeat_n(chunk, n_ks).flatten())
+        .flat_map(|chunk| iter::repeat_n(chunk, n_ks).flatten())
         .cloned()
         .collect();
 
     // ks: add batch in the end
-    let ks_kb: Vec<_> = ks.iter().flat_map(|&k| repeat_n(k, n_batch)).collect();
+    let ks_kb: Vec<_> = ks
+        .iter()
+        .flat_map(|&k| iter::repeat_n(k, n_batch))
+        .collect();
     // ks: add in dimension in front
     let ks_ikb: Vec<_> = ks_kb.repeat(n_in);
 
     // x * k product on NPU
-    let xtimesk_ikb = driver_mul(npu_id, &xs_ikb, &ks_ikb)?;
+    let xtimesk_ikb = qant_driver_import::mul(npu_id, &xs_ikb, &ks_ikb)?;
 
     // add out dimension in front
     let xtimesk_jikb = xtimesk_ikb.repeat(n_out);
     // phis and ampls: insert batch dimension in the end
-    let phis_jikb = phis.data().iter().flat_map(|&elem| repeat_n(elem, n_batch));
+    let phis_jikb = phis
+        .data()
+        .iter()
+        .flat_map(|&elem| iter::repeat_n(elem, n_batch));
     let amps_jikb: Vec<_> = ampls
         .data()
         .iter()
-        .flat_map(|&elem| repeat_n(elem, n_batch))
+        .flat_map(|&elem| iter::repeat_n(elem, n_batch))
         .collect();
 
     // xtimesk + phi on cpu
@@ -200,7 +201,7 @@ pub fn calc_kan_layer<'a, 'b>(
         .collect();
 
     // nonlinearity on NPU
-    let res_jikb = driver_scaled_periodic_nl(npu_id, &cos_arg_jikb, &amps_jikb)?;
+    let res_jikb = qant_driver_import::scaled_periodic_nl(npu_id, &cos_arg_jikb, &amps_jikb)?;
 
     // sum over i and k
     let res_jb: Vec<_> = res_jikb
@@ -226,27 +227,24 @@ pub fn calc_kan_layer<'a, 'b>(
 
 #[cfg(test)]
 mod tests {
-    use crate::{data_format_conversion::to_bf16s, utils::test_utils::assert_almost_equal_vec};
+    use crate::utils::test_utils;
 
     use super::*;
 
     #[test]
     fn relu_test() {
-        let v = to_bf16s(&vec![-1, 0, 10, 5]);
-        let expected = to_bf16s(&vec![0, 0, 10, 5]);
+        let v = test_utils::to_bf16s(&vec![-1, 0, 10, 5]);
+        let expected = test_utils::to_bf16s(&vec![0, 0, 10, 5]);
 
-        let mut features = QantTensor1::new(&v, [4]).unwrap();
+        let features = QantTensor1::new(&v, [4]).unwrap();
         let res_out_place = relu_fprop(0, &features);
         assert_eq!(res_out_place.data(), expected);
-
-        relu_fprop_inplace(&mut features);
-        assert_eq!(features.data(), expected);
     }
 
     #[test]
     fn sigmoid_test() {
-        let v = to_bf16s(&vec![-0.001, 0., 0.01, 0.5, 1., 10., -1.]);
-        let expected = to_bf16s(&vec![0.5, 0.5, 0.503, 0.621, 0.730, 1.0, 0.269]);
+        let v = test_utils::to_bf16s(&vec![-0.001, 0., 0.01, 0.5, 1., 10., -1.]);
+        let expected = test_utils::to_bf16s(&vec![0.5, 0.5, 0.503, 0.621, 0.730, 1.0, 0.269]);
 
         let features = QantTensor1::new(&v, [7]).unwrap();
         let res_out_place = sigmoid_fprop(0, &features);
@@ -255,11 +253,11 @@ mod tests {
 
     #[test]
     fn softmax_test() {
-        let v = to_bf16s(&vec![-5., 3.1, 1.3, 0.4, 2.1, 4.11, 5.4, 6.22]);
+        let v = test_utils::to_bf16s(&vec![-5., 3.1, 1.3, 0.4, 2.1, 4.11, 5.4, 6.22]);
         let features = QantTensor2::new(v, [1, 8]).unwrap();
         let res = softmax_fprop(0, &features).unwrap();
 
-        let expected = to_bf16s(&vec![
+        let expected = test_utils::to_bf16s(&vec![
             8.165836e-6,
             0.026733398,
             0.004425049,
@@ -274,17 +272,37 @@ mod tests {
     }
 
     #[test]
+    fn softmax_batched_test() {
+        let rows = [
+            vec![-5., 3.1, 1.3, 0.4],
+            vec![2.1, 4.11, 5.4, 6.22],
+            vec![0., 0., 0., 0.],
+        ];
+        let flat: Vec<f32> = rows.iter().flatten().copied().collect();
+        let features = QantTensor2::new(test_utils::to_bf16s(&flat), [3, 4]).unwrap();
+        let res = softmax_fprop(0, &features).unwrap();
+        assert_eq!(res.shape(), features.shape());
+
+        // every row must equal the unbatched result of that row
+        for (b, row) in rows.iter().enumerate() {
+            let single = QantTensor2::new(test_utils::to_bf16s(row), [1, 4]).unwrap();
+            let expected = softmax_fprop(0, &single).unwrap();
+            assert_eq!(&res.data()[b * 4..(b + 1) * 4], expected.data());
+        }
+    }
+
+    #[test]
     fn nonlinearity() {
-        let vs = to_bf16s(&vec![-1., -0.5, 0., 0.5, 1.]);
-        let us = to_bf16s(&vec![-20., 1., 0., 0.5, -1.]);
-        let ws_npu = driver_scaled_periodic_nl(0, &us, &vs).unwrap();
+        let vs = test_utils::to_bf16s(&vec![-1., -0.5, 0., 0.5, 1.]);
+        let us = test_utils::to_bf16s(&vec![-20., 1., 0., 0.5, -1.]);
+        let ws_npu = qant_driver_import::scaled_periodic_nl(0, &us, &vs).unwrap();
         let ws_cpu: Vec<_> = us
             .iter()
             .zip(vs.iter())
             .map(|(&u, &v)| u.cos() * v)
             .collect();
         println!("{ws_npu:?} {ws_cpu:?}");
-        assert_almost_equal_vec(&ws_npu, &ws_cpu, 0.1);
+        test_utils::assert_almost_equal_vec(&ws_npu, &ws_cpu, 0.1);
     }
 
     #[test]
@@ -294,19 +312,22 @@ mod tests {
         let n_ks = 3;
         let n_batches = 4;
 
-        let xs_in =
-            QantTensor2::new(to_bf16s(&vec![0.8; n_batches * n_in]), [n_batches, n_in]).unwrap();
+        let xs_in = QantTensor2::new(
+            test_utils::to_bf16s(&vec![0.8; n_batches * n_in]),
+            [n_batches, n_in],
+        )
+        .unwrap();
         let ampls = QantTensor3::new(
-            to_bf16s(&vec![0.7; n_out * n_in * n_ks]),
+            test_utils::to_bf16s(&vec![0.7; n_out * n_in * n_ks]),
             [n_out, n_in, n_ks],
         )
         .unwrap();
         let phis = QantTensor3::new(
-            to_bf16s(&vec![0.6; n_out * n_in * n_ks]),
+            test_utils::to_bf16s(&vec![0.6; n_out * n_in * n_ks]),
             [n_out, n_in, n_ks],
         )
         .unwrap();
-        let ks = to_bf16s(&vec![0.5; n_ks]);
+        let ks = test_utils::to_bf16s(&vec![0.5; n_ks]);
 
         let res = calc_kan_layer(0, &xs_in, &phis, &ampls, &ks).unwrap();
 

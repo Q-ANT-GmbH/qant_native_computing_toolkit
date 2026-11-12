@@ -1,10 +1,7 @@
 use crate::{
     data_structures::QantTensor2,
     errors::ToolkitError,
-    qant_driver_import::{
-        QantDataRole, QantDriverHandle, driver_allocate, driver_download, driver_free,
-        driver_mul_matrix_vec_batched_mem, driver_upload,
-    },
+    qant_driver_import::{self, QantDataRole, QantDriverHandle},
     toolkit_error,
 };
 
@@ -22,7 +19,7 @@ impl QantMemoryHandle {
         cols: usize,
         data_role: QantDataRole,
     ) -> Result<Self, ToolkitError> {
-        let handle = driver_allocate(npu_id, rows, cols, data_role)?;
+        let handle = qant_driver_import::allocate(npu_id, rows, cols, data_role)?;
         Ok(Self {
             rows,
             cols,
@@ -66,7 +63,7 @@ impl QantMemoryHandle {
             ));
         }
 
-        driver_upload(self.handle, matrix.data())
+        qant_driver_import::upload(self.handle, matrix.data())
     }
 
     pub fn download<'b>(&self) -> Result<QantTensor2<'b>, ToolkitError> {
@@ -74,14 +71,14 @@ impl QantMemoryHandle {
             return Err(toolkit_error!("Download of weights is not supported."));
         }
 
-        let output = driver_download(self.handle, self.rows * self.cols)?;
+        let output = qant_driver_import::download(self.handle, self.rows * self.cols)?;
         QantTensor2::new(output, [self.rows, self.cols])
     }
 }
 
 impl Drop for QantMemoryHandle {
     fn drop(&mut self) {
-        if let Err(err) = driver_free(self.handle) {
+        if let Err(err) = qant_driver_import::free(self.handle) {
             toolkit_error!(
                 "Failed to free device memory handle {:?} on NPU {}: {:?}",
                 self.handle,
@@ -131,7 +128,7 @@ pub fn mul_matrix_vec_batched_mem(
         ));
     }
 
-    driver_mul_matrix_vec_batched_mem(
+    qant_driver_import::mul_matrix_vec_batched_mem(
         handle_matrix.handle,
         handle_vector.handle,
         handle_result.handle,
@@ -142,9 +139,8 @@ pub fn mul_matrix_vec_batched_mem(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data_format_conversion::to_bf16s;
     use crate::data_structures::QantTensor2;
-    use crate::utils::test_utils::assert_almost_equal_vec;
+    use crate::utils::test_utils;
 
     #[test]
     fn test_allocate_and_drop_matrix() {
@@ -161,7 +157,7 @@ mod tests {
         let rows = 2;
         let cols = 3;
 
-        let data = to_bf16s(&vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        let data = test_utils::to_bf16s(&vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
         let matrix = QantTensor2::new(data.clone(), [rows, cols]).unwrap();
         let handle =
             QantMemoryHandle::allocate(npu_id, rows, cols, QantDataRole::Features).unwrap();
@@ -172,7 +168,7 @@ mod tests {
 
     #[test]
     fn test_from_matrix() {
-        let data = to_bf16s(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        let data = test_utils::to_bf16s(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
         let matrix = QantTensor2::new(data.clone(), [2, 3]).unwrap();
         let handle = QantMemoryHandle::from_matrix(0, &matrix, QantDataRole::Features).unwrap();
         assert_eq!((handle.rows(), handle.cols()), (2, 3));
@@ -193,12 +189,12 @@ mod tests {
             QantMemoryHandle::allocate(npu_id, vector_rows, rows, QantDataRole::Features).unwrap();
 
         let matrix = QantTensor2::new(
-            to_bf16s(&[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.0, 1.0]),
+            test_utils::to_bf16s(&[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.0, 1.0]),
             [rows, cols],
         )
         .unwrap();
         let vectors = QantTensor2::new(
-            to_bf16s(&[0., 1.0, 0.5, 0.0, 1.0, 0.5, 0.5, 0.5, 0.5]),
+            test_utils::to_bf16s(&[0., 1.0, 0.5, 0.0, 1.0, 0.5, 0.5, 0.5, 0.5]),
             [vector_rows, cols],
         )
         .unwrap();
@@ -208,11 +204,11 @@ mod tests {
         mul_matrix_vec_batched_mem(&handle_matrix, &handle_vector, &handle_result).unwrap();
 
         let result = handle_result.download().unwrap();
-        let res_shouldbe = to_bf16s(&vec![
+        let res_shouldbe = test_utils::to_bf16s(&vec![
             0.35, 0.8, 1.25, 1.5, 0.35, 0.8, 1.25, 1.5, 0.3, 0.75, 1.2, 1.5,
         ]);
 
-        assert_almost_equal_vec(&res_shouldbe, result.data(), 0.05);
+        test_utils::assert_almost_equal_vec(&res_shouldbe, result.data(), 0.05);
     }
 
     #[test]
@@ -327,30 +323,33 @@ mod tests {
 
     #[test]
     fn double_free_returns_error() {
-        let handle = driver_allocate(0, 2, 3, QantDataRole::Features).unwrap();
-        driver_free(handle).unwrap();
+        let handle = qant_driver_import::allocate(0, 2, 3, QantDataRole::Features).unwrap();
+        qant_driver_import::free(handle).unwrap();
 
         // freeing an already-freed handle must return a clean error, not panic
         // or silently affect a handle that has since reused the same slot.
-        assert!(driver_free(handle).is_err());
+        assert!(qant_driver_import::free(handle).is_err());
     }
 
     #[test]
     fn use_after_free_returns_error() {
-        let handle = driver_allocate(0, 2, 3, QantDataRole::Features).unwrap();
-        driver_free(handle).unwrap();
+        let handle = qant_driver_import::allocate(0, 2, 3, QantDataRole::Features).unwrap();
+        qant_driver_import::free(handle).unwrap();
 
-        let data = to_bf16s(&[0.0; 6]);
+        let data = test_utils::to_bf16s(&[0.0; 6]);
 
         // every operation on a freed handle must return an error, not panic.
-        assert!(driver_upload(handle, &data).is_err());
-        assert!(driver_download(handle, 6).is_err());
+        assert!(qant_driver_import::upload(handle, &data).is_err());
+        assert!(qant_driver_import::download(handle, 6).is_err());
 
-        let other_matrix = driver_allocate(0, 1, 3, QantDataRole::Weights).unwrap();
-        let other_result = driver_allocate(0, 2, 1, QantDataRole::Features).unwrap();
-        assert!(driver_mul_matrix_vec_batched_mem(other_matrix, handle, other_result).is_err());
+        let other_matrix = qant_driver_import::allocate(0, 1, 3, QantDataRole::Weights).unwrap();
+        let other_result = qant_driver_import::allocate(0, 2, 1, QantDataRole::Features).unwrap();
+        assert!(
+            qant_driver_import::mul_matrix_vec_batched_mem(other_matrix, handle, other_result)
+                .is_err()
+        );
 
-        driver_free(other_matrix).unwrap();
-        driver_free(other_result).unwrap();
+        qant_driver_import::free(other_matrix).unwrap();
+        qant_driver_import::free(other_result).unwrap();
     }
 }
