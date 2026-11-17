@@ -8,13 +8,24 @@ use std::{ffi::c_void, slice};
 
 use half::bf16;
 
-use crate::{data_structures::QantTensor, errors::ToolkitError, toolkit_error};
+use crate::{
+    data_structures::{QantTensor, QantTensor3},
+    errors::ToolkitError,
+    toolkit_error,
+};
 
 pub type ShapeType = i64;
 
 pub const DLDTYPE_BF16: DLDataType = DLDataType {
     code: DLDataTypeCode_kDLBfloat as u8,
     bits: 16,
+    lanes: 1,
+};
+
+/// Complex number made of two bfloat16 values (real, imaginary), stored interleaved.
+pub const DLDTYPE_BCOMPLEX32: DLDataType = DLDataType {
+    code: DLDataTypeCode_kDLBcomplex as u8,
+    bits: 32,
     lanes: 1,
 };
 
@@ -146,10 +157,14 @@ fn to_usize_array<const D: usize>(shape: &[i64]) -> Result<[usize; D], ToolkitEr
     Ok(fixed)
 }
 
-pub fn dltensor_to_qant_tensor<'a, const D: usize>(
+/// Validates a DLPack tensor (non-null, `D` dimensions, `dtype`) and returns its shape
+/// together with its data reinterpreted as a flat bf16 slice of `bf16_per_element` values per element.
+fn dltensor_to_bf16_slice<'a, const D: usize>(
     dltensor_ptr: *const DLManagedTensorVersioned,
     name: &str,
-) -> Result<QantTensor<'a, D>, ToolkitError> {
+    dtype: DLDataType,
+    bf16_per_element: usize,
+) -> Result<(&'a [bf16], [usize; D]), ToolkitError> {
     if dltensor_ptr.is_null() {
         return Err(ToolkitError::from_str(
             "got nullpointer instead of *DLManagedTensorVersioned",
@@ -169,15 +184,37 @@ pub fn dltensor_to_qant_tensor<'a, const D: usize>(
     let shape_fixed: [usize; D] = to_usize_array::<D>(shape)?;
 
     let len_data: ShapeType = shape.iter().copied().product();
-    if tensor.dtype != DLDTYPE_BF16 {
+    if tensor.dtype != dtype {
         return Err(toolkit_error!(
-            "Invalid dtype, {name} has dtype {0:?}, only {DLDTYPE_BF16:?} supported",
+            "Invalid dtype, {name} has dtype {0:?}, only {dtype:?} supported",
             tensor.dtype
         ));
     }
-    let data: &[bf16] =
-        unsafe { slice::from_raw_parts(tensor.data as *const bf16, len_data as usize) };
-    QantTensor::new(data, shape_fixed)
+    let data: &[bf16] = unsafe {
+        slice::from_raw_parts(
+            tensor.data as *const bf16,
+            len_data as usize * bf16_per_element,
+        )
+    };
+    Ok((data, shape_fixed))
+}
+
+pub fn dltensor_to_qant_tensor<'a, const D: usize>(
+    dltensor_ptr: *const DLManagedTensorVersioned,
+    name: &str,
+) -> Result<QantTensor<'a, D>, ToolkitError> {
+    let (data, shape) = dltensor_to_bf16_slice::<D>(dltensor_ptr, name, DLDTYPE_BF16, 1)?;
+    QantTensor::new(data, shape)
+}
+
+/// Converts a 2D bcomplex32 DLPack tensor of shape `(n, m)` into a bf16 `QantTensor3` of shape
+/// `(n, m, 2)` holding the interleaved real and imaginary parts (zero-copy).
+pub fn dltensor_bcomplex_to_qant_tensor3<'a>(
+    dltensor_ptr: *const DLManagedTensorVersioned,
+    name: &str,
+) -> Result<QantTensor3<'a>, ToolkitError> {
+    let (data, [n, m]) = dltensor_to_bf16_slice::<2>(dltensor_ptr, name, DLDTYPE_BCOMPLEX32, 2)?;
+    QantTensor::new(data, [n, m, 2])
 }
 
 pub fn qant_tensor_to_dltensor<const D: usize>(
@@ -189,6 +226,36 @@ pub fn qant_tensor_to_dltensor<const D: usize>(
         .iter()
         .map(|&x| x as ShapeType)
         .collect();
+    qant_tensor_to_dltensor_with(qant_tensor, device, DLDTYPE_BF16, shape)
+}
+
+/// Converts a bf16 `QantTensor3` of shape `(n, m, 2)` (interleaved real and imaginary parts)
+/// into a 2D bcomplex32 DLPack tensor of shape `(n, m)` (zero-copy).
+pub fn qant_tensor3_to_bcomplex_dltensor(
+    qant_tensor: QantTensor3,
+    device: DLDevice,
+) -> Result<DLManagedTensorVersioned, ToolkitError> {
+    let [n, m, re_im] = *qant_tensor.shape();
+    if re_im != 2 {
+        return Err(toolkit_error!(
+            "last dimension must hold real and imaginary part (size 2), got {re_im}"
+        ));
+    }
+    let shape: Vec<ShapeType> = vec![n as ShapeType, m as ShapeType];
+    qant_tensor_to_dltensor_with(qant_tensor, device, DLDTYPE_BCOMPLEX32, shape)
+}
+
+/// Wraps `qant_tensor` into a DLPack tensor with the given `dtype` and `shape`.
+/// `shape` must describe the same memory as the tensor; it may differ from the tensor's own shape
+/// (e.g. when exposing bf16 pairs as complex elements). The deleter frees the shape using `ndim`.
+fn qant_tensor_to_dltensor_with<const D: usize>(
+    qant_tensor: QantTensor<D>,
+    device: DLDevice,
+    dtype: DLDataType,
+    shape: Vec<ShapeType>,
+) -> Result<DLManagedTensorVersioned, ToolkitError> {
+    // the deleter rebuilds the shape vec with capacity == ndim
+    let shape = shape.into_boxed_slice().into_vec();
 
     let arr_ptr = qant_tensor.data().as_ptr() as *mut c_void;
     let manager_ctx = Box::into_raw(Box::new(qant_tensor)) as *mut c_void;
@@ -197,7 +264,7 @@ pub fn qant_tensor_to_dltensor<const D: usize>(
         data: arr_ptr,
         device,
         ndim: shape.len() as i32,
-        dtype: DLDTYPE_BF16,
+        dtype,
         shape: shape.as_ptr() as *mut ShapeType,
         strides: std::ptr::null::<ShapeType>() as *mut ShapeType,
         byte_offset: 0,

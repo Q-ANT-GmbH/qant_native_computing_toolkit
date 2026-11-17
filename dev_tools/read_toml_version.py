@@ -6,8 +6,9 @@ python3 ships tomllib, so no extra TOML reader has to be installed.
 """
 
 import argparse
-import tomllib
 from pathlib import Path
+
+import tomllib
 
 
 def read_version(toml_file: Path, table: str) -> str:

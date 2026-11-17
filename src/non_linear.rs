@@ -15,13 +15,19 @@ fn relu(v: Value) -> Value {
 
 /// Applies a ReLu function to all values
 /// ReLu is defined as: max(x, 0)
-pub fn relu_fprop<'b>(_npu_id: u32, features: &QantTensor1<'_>) -> QantTensor1<'b> {
+///
+/// This operation is not dispatched to any NPU. `npu_id` is
+/// accepted for API consistency and resolved like for all other operations:
+/// it must be `-1` (auto-select) or the id of an available NPU.
+pub fn relu_fprop<'b>(
+    npu_id: i32,
+    features: &QantTensor1<'_>,
+) -> Result<QantTensor1<'b>, ToolkitError> {
+    qant_driver_import::check_npu_id(npu_id)?;
     // TODO: implement multi-threading
     let data: Vec<Value> = features.data().iter().map(|e| relu(*e)).collect();
 
-    // the shape check here can't fail
-    #[allow(clippy::unwrap_used)]
-    QantTensor1::new(data, *features.shape()).unwrap()
+    QantTensor1::new(data, *features.shape())
 }
 
 #[inline]
@@ -31,21 +37,32 @@ fn sigmoid(v: Value) -> Value {
 
 /// Applies a Sigmoid function to all values
 /// Sigmoid is defined as: 1 / (1 + exp(-x))
-pub fn sigmoid_fprop<'b>(_npu_id: u32, features: &QantTensor1<'_>) -> QantTensor1<'b> {
+///
+/// This operation is not dispatched to any NPU. `npu_id` is
+/// accepted for API consistency and resolved like for all other operations:
+/// it must be `-1` (auto-select) or the id of an available NPU.
+pub fn sigmoid_fprop<'b>(
+    npu_id: i32,
+    features: &QantTensor1<'_>,
+) -> Result<QantTensor1<'b>, ToolkitError> {
+    qant_driver_import::check_npu_id(npu_id)?;
     // TODO: implement multi-threading
     let data: Vec<Value> = features.data().iter().map(|e| sigmoid(*e)).collect();
 
-    // the shape check here can't fail
-    #[allow(clippy::unwrap_used)]
-    QantTensor1::new(data, *features.shape()).unwrap()
+    QantTensor1::new(data, *features.shape())
 }
 
 /// Applies a softmax function to the feature_data
 /// Softmax is defined as: exp(x_i) / sum_over_i(exp(x_i))
+///
+/// This operation is not dispatched to any NPU. `npu_id` is
+/// accepted for API consistency and resolved like for all other operations:
+/// it must be `-1` (auto-select) or the id of an available NPU.
 pub fn softmax_fprop<'b>(
-    _npu_id: u32,
+    npu_id: i32,
     features: &QantTensor2<'_>,
 ) -> Result<QantTensor2<'b>, ToolkitError> {
+    qant_driver_import::check_npu_id(npu_id)?;
     let n_channels = features.shape()[1];
     if n_channels == 0 {
         return QantTensor2::new(Vec::new(), *features.shape());
@@ -66,7 +83,7 @@ pub fn softmax_fprop<'b>(
 
 /// Calculates a scaled periodic nonlinear function for all pairs of values in feature_data and weights_data
 pub fn calc_scaled_periodic_nl<'a, 'b>(
-    npu_id: u32,
+    npu_id: i32,
     feature_data: &QantTensor1<'a>,
     weights_data: &QantTensor1<'a>,
 ) -> Result<QantTensor1<'b>, ToolkitError> {
@@ -113,7 +130,7 @@ fn transpose_2d_flat<T: Clone>(
 /// phis the phase offsets (tensor), ampls the amplitude (tensor), and y_bj the batch of outputs.
 /// tcos() denotes the cosine-related shape of the periodic optical nonlinearity.
 pub fn calc_kan_layer<'a, 'b>(
-    npu_id: u32,
+    npu_id: i32,
     xs: &QantTensor2<'a>,    // shape (n_batches, n_channels_in)
     phis: &QantTensor3<'a>,  // shape (n_channels_out, n_channels_in, n_ks)
     ampls: &QantTensor3<'a>, // shape (n_channels_out, n_channels_in, n_ks)
@@ -237,7 +254,7 @@ mod tests {
         let expected = test_utils::to_bf16s(&vec![0, 0, 10, 5]);
 
         let features = QantTensor1::new(&v, [4]).unwrap();
-        let res_out_place = relu_fprop(0, &features);
+        let res_out_place = relu_fprop(0, &features).unwrap();
         assert_eq!(res_out_place.data(), expected);
     }
 
@@ -247,7 +264,7 @@ mod tests {
         let expected = test_utils::to_bf16s(&vec![0.5, 0.5, 0.503, 0.621, 0.730, 1.0, 0.269]);
 
         let features = QantTensor1::new(&v, [7]).unwrap();
-        let res_out_place = sigmoid_fprop(0, &features);
+        let res_out_place = sigmoid_fprop(0, &features).unwrap();
         assert_eq!(res_out_place.data(), expected);
     }
 

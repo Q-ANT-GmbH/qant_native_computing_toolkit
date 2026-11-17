@@ -2,7 +2,7 @@
 use half::bf16;
 use numpy::ndarray::Array;
 use numpy::{
-    IntoPyArray, PyArray, PyArray1, PyArray2, PyArray4, PyArrayMethods, PyReadonlyArray,
+    IntoPyArray, PyArray, PyArray1, PyArray2, PyArray3, PyArray4, PyArrayMethods, PyReadonlyArray,
     PyReadonlyArray1, PyReadonlyArray2, PyReadonlyArray3, PyReadonlyArray4, PyUntypedArrayMethods,
 };
 use pyo3::prelude::*;
@@ -16,7 +16,7 @@ type Feature = crate::global_settings::Value;
 use crate::data_structures::QantTensor;
 use crate::errors::ToolkitError;
 use crate::memory_management::QantMemoryHandle as RustQantMemoryHandle;
-use crate::qant_driver_import::QantDataRole;
+use crate::qant_driver_import::{QantDataRole, QantDeviceCapability};
 use crate::utils;
 
 impl From<ToolkitError> for PyErr {
@@ -26,12 +26,12 @@ impl From<ToolkitError> for PyErr {
 }
 
 #[pyfunction]
-fn init_npu(id: u32) -> PyResult<()> {
+fn init_npu(id: i32) -> PyResult<()> {
     Ok(crate::init_npu(id)?)
 }
 
 #[pyfunction]
-fn release_npu(id: u32) -> PyResult<()> {
+fn release_npu(id: i32) -> PyResult<()> {
     Ok(crate::release_npu(id)?)
 }
 
@@ -42,7 +42,7 @@ fn setup_logging(folder_name: String, loglevel: i32) -> PyResult<()> {
 }
 
 #[pyfunction]
-fn get_driver_info(npu_id: u32) -> PyResult<String> {
+fn get_driver_info(npu_id: i32) -> PyResult<String> {
     Ok(crate::get_driver_info(npu_id)?)
 }
 
@@ -101,7 +101,7 @@ where
 #[pyfunction]
 fn linear_fprop<'py>(
     py: Python<'py>,
-    npu_id: u32,
+    npu_id: i32,
     feature_arr: PyReadonlyArray2<'py, Feature>,
     filter_arr: PyReadonlyArray2<'py, Feature>,
 ) -> PyResult<Bound<'py, PyArray2<Feature>>> {
@@ -116,7 +116,7 @@ fn linear_fprop<'py>(
 #[pyfunction]
 fn conv_fprop<'py>(
     py: Python<'py>,
-    npu_id: u32,
+    npu_id: i32,
     features_arr: PyReadonlyArray4<'py, Feature>,
     weights_arr: PyReadonlyArray4<'py, Feature>,
     padding: usize,
@@ -135,7 +135,7 @@ fn conv_fprop<'py>(
 
 #[pyfunction]
 fn upload_conv_weights<'py>(
-    npu_id: u32,
+    npu_id: i32,
     weights_arr: PyReadonlyArray4<'py, Feature>,
 ) -> PyResult<PyConvWeightsHandle> {
     let weights_data = pyarray_to_qant_tensor(&weights_arr)?;
@@ -170,7 +170,7 @@ fn conv_fprop_preloaded_weights<'py>(
 #[pyfunction]
 fn conv_transpose_fprop<'py>(
     py: Python<'py>,
-    npu_id: u32,
+    npu_id: i32,
     features_arr: PyReadonlyArray4<'py, Feature>,
     weights_arr: PyReadonlyArray4<'py, Feature>,
     padding: usize,
@@ -191,7 +191,7 @@ fn conv_transpose_fprop<'py>(
 
 #[pyfunction]
 fn upload_conv_transpose_weights<'py>(
-    npu_id: u32,
+    npu_id: i32,
     weights_arr: PyReadonlyArray4<'py, Feature>,
 ) -> PyResult<PyConvTransposeWeightsHandle> {
     let weights_data = pyarray_to_qant_tensor(&weights_arr)?;
@@ -228,7 +228,7 @@ fn conv_transpose_fprop_preloaded_weights<'py>(
 #[pyfunction]
 fn add_bias_fprop<'py>(
     py: Python<'py>,
-    npu_id: u32,
+    npu_id: i32,
     feature_arr: PyReadonlyArray2<'py, Feature>,
     bias_arr: PyReadonlyArray1<'py, Feature>,
 ) -> PyResult<Bound<'py, PyArray2<Feature>>> {
@@ -251,7 +251,7 @@ fn add_bias_fprop<'py>(
 #[pyfunction]
 fn add_bias_for_conv2d_fprop<'py>(
     py: Python<'py>,
-    npu_id: u32,
+    npu_id: i32,
     feature_arr: PyReadonlyArray4<'py, Feature>,
     bias_arr: PyReadonlyArray1<'py, Feature>,
 ) -> PyResult<Bound<'py, PyArray4<Feature>>> {
@@ -274,7 +274,7 @@ fn add_bias_for_conv2d_fprop<'py>(
 #[pyfunction]
 fn calc_scaled_periodic_nl_fprop<'py>(
     py: Python<'py>,
-    npu_id: u32,
+    npu_id: i32,
     feature_arr: PyReadonlyArray1<'py, Feature>,
     weights_arr: PyReadonlyArray1<'py, Feature>,
 ) -> PyResult<Bound<'py, PyArray1<Feature>>> {
@@ -289,7 +289,7 @@ fn calc_scaled_periodic_nl_fprop<'py>(
 #[pyfunction]
 fn calc_kan_layer_fprop<'py>(
     py: Python<'py>,
-    npu_id: u32,
+    npu_id: i32,
     feature_arr: PyReadonlyArray2<'py, Feature>,
     phis_arr: PyReadonlyArray3<'py, Feature>,
     ampls_arr: PyReadonlyArray3<'py, Feature>,
@@ -309,7 +309,7 @@ fn calc_kan_layer_fprop<'py>(
 #[pyfunction]
 fn mul<'py>(
     py: Python<'py>,
-    npu_id: u32,
+    npu_id: i32,
     us: PyReadonlyArray1<'py, Feature>,
     vs: PyReadonlyArray1<'py, Feature>,
 ) -> PyResult<Bound<'py, PyArray1<Feature>>> {
@@ -323,29 +323,29 @@ fn mul<'py>(
 #[pyfunction]
 fn relu_fprop<'py>(
     py: Python<'py>,
-    npu_id: u32,
+    npu_id: i32,
     feature_arr: PyReadonlyArray1<'py, Feature>,
 ) -> PyResult<Bound<'py, PyArray1<Feature>>> {
     let feature_data = pyarray_to_qant_tensor(&feature_arr)?;
-    let res = crate::non_linear::relu_fprop(npu_id, &feature_data);
+    let res = crate::non_linear::relu_fprop(npu_id, &feature_data)?;
     qant_tensor_to_pyarray(py, res)
 }
 
 #[pyfunction]
 fn sigmoid_fprop<'py>(
     py: Python<'py>,
-    npu_id: u32,
+    npu_id: i32,
     feature_arr: PyReadonlyArray1<'py, Feature>,
 ) -> PyResult<Bound<'py, PyArray1<Feature>>> {
     let feature_data = pyarray_to_qant_tensor(&feature_arr)?;
-    let res = crate::non_linear::sigmoid_fprop(npu_id, &feature_data);
+    let res = crate::non_linear::sigmoid_fprop(npu_id, &feature_data)?;
     qant_tensor_to_pyarray(py, res)
 }
 
 #[pyfunction]
 fn softmax_fprop<'py>(
     py: Python<'py>,
-    npu_id: u32,
+    npu_id: i32,
     feature_arr: PyReadonlyArray2<'py, Feature>,
 ) -> PyResult<Bound<'py, PyArray2<Feature>>> {
     let feature_data = pyarray_to_qant_tensor(&feature_arr)?;
@@ -356,7 +356,7 @@ fn softmax_fprop<'py>(
 #[pyfunction]
 fn batchnorm2d_fprop<'py>(
     py: Python<'py>,
-    npu_id: u32,
+    npu_id: i32,
     feature_arr: PyReadonlyArray4<'py, Feature>,
     means: PyReadonlyArray1<'py, Feature>,
     variances: PyReadonlyArray1<'py, Feature>,
@@ -386,7 +386,7 @@ fn batchnorm2d_fprop<'py>(
 #[pyfunction]
 fn maxpool2d_fprop<'py>(
     py: Python<'py>,
-    npu_id: u32,
+    npu_id: i32,
     feature_arr: PyReadonlyArray4<'py, Feature>,
     kernel_height: usize,
     kernel_width: usize,
@@ -411,7 +411,7 @@ fn maxpool2d_fprop<'py>(
 #[pyfunction]
 fn avgpool2d_fprop<'py>(
     py: Python<'py>,
-    npu_id: u32,
+    npu_id: i32,
     feature_arr: PyReadonlyArray4<'py, Feature>,
     kernel_height: usize,
     kernel_width: usize,
@@ -437,7 +437,7 @@ fn avgpool2d_fprop<'py>(
 #[pyfunction]
 fn adaptive_maxpool2d_fprop<'py>(
     py: Python<'py>,
-    npu_id: u32,
+    npu_id: i32,
     feature_arr: PyReadonlyArray4<'py, Feature>,
     output_height: usize,
     output_width: usize,
@@ -457,7 +457,7 @@ fn adaptive_maxpool2d_fprop<'py>(
 #[pyfunction]
 fn adaptive_avgpool2d_fprop<'py>(
     py: Python<'py>,
-    npu_id: u32,
+    npu_id: i32,
     feature_arr: PyReadonlyArray4<'py, Feature>,
     output_height: usize,
     output_width: usize,
@@ -564,7 +564,7 @@ impl From<RustQantMemoryHandle> for PyQantMemoryHandle {
 
 #[pyfunction]
 fn allocate(
-    npu_id: u32,
+    npu_id: i32,
     rows: usize,
     cols: usize,
     data_role: PyDataRole,
@@ -574,7 +574,7 @@ fn allocate(
 
 #[pyfunction]
 fn upload(
-    npu_id: u32,
+    npu_id: i32,
     data: PyReadonlyArray2<Feature>,
     data_role: PyDataRole,
 ) -> PyResult<PyQantMemoryHandle> {
@@ -616,7 +616,18 @@ fn linear_fprop_preloaded(
 }
 
 #[pyfunction]
-fn get_sensor_info(py: Python, npu_id: u32) -> PyResult<Bound<PyDict>> {
+fn dft<'py>(
+    py: Python<'py>,
+    npu_id: i32,
+    feature_arr: PyReadonlyArray3<'py, Feature>,
+) -> PyResult<Bound<'py, PyArray3<Feature>>> {
+    let feature_data = pyarray_to_qant_tensor(&feature_arr)?;
+    let res = crate::dft::dft(npu_id, &feature_data)?;
+    qant_tensor_to_pyarray(py, res)
+}
+
+#[pyfunction]
+fn get_sensor_info(py: Python, npu_id: i32) -> PyResult<Bound<PyDict>> {
     let info = crate::get_device_info(npu_id)?;
     let ret_dict = PyDict::new(py);
 
@@ -642,7 +653,7 @@ fn get_sensor_info(py: Python, npu_id: u32) -> PyResult<Bound<PyDict>> {
 }
 
 #[pyfunction]
-fn get_version_info(py: Python, npu_id: u32) -> PyResult<Bound<PyDict>> {
+fn get_version_info(py: Python, npu_id: i32) -> PyResult<Bound<PyDict>> {
     let info = crate::get_device_info(npu_id)?;
     let ret_dict = PyDict::new(py);
 
@@ -654,23 +665,23 @@ fn get_version_info(py: Python, npu_id: u32) -> PyResult<Bound<PyDict>> {
 }
 
 #[pyfunction]
-fn get_available_npus(py: Python) -> PyResult<Bound<PyDict>> {
-    let npus = crate::get_available_npus()?;
-    let ret_dict = PyDict::new(py);
-
-    for (npu_id, npu_serial) in npus.into_iter() {
-        ret_dict.set_item(npu_id, npu_serial)?;
-    }
-    Ok(ret_dict)
+fn get_capabilities(npu_id: i32) -> PyResult<Vec<QantDeviceCapability>> {
+    Ok(crate::get_capabilities(npu_id)?)
 }
 
 #[pyfunction]
-fn reset_perf_counter(npu_id: u32) -> PyResult<()> {
+#[pyo3(signature = (operations = Vec::new()))]
+fn get_available_npus(operations: Vec<QantDeviceCapability>) -> PyResult<Vec<(u32, String)>> {
+    Ok(crate::get_available_npus(&operations)?)
+}
+
+#[pyfunction]
+fn reset_perf_counter(npu_id: i32) -> PyResult<()> {
     Ok(crate::qant_driver_import::reset_perf_counter(npu_id)?)
 }
 
 #[pyfunction]
-fn get_perf_counter(py: Python, npu_id: u32) -> PyResult<Bound<PyDict>> {
+fn get_perf_counter(py: Python, npu_id: i32) -> PyResult<Bound<PyDict>> {
     let info = crate::qant_driver_import::get_perf_counter(npu_id)?;
 
     let ret_dict = PyDict::new(py);
@@ -712,9 +723,11 @@ fn qant_native_computing_toolkit(m: &Bound<PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(get_sensor_info, m)?)?;
     m.add_function(wrap_pyfunction!(get_version_info, m)?)?;
     m.add_function(wrap_pyfunction!(get_available_npus, m)?)?;
+    m.add_function(wrap_pyfunction!(get_capabilities, m)?)?;
     m.add_function(wrap_pyfunction!(reset_perf_counter, m)?)?;
     m.add_function(wrap_pyfunction!(get_perf_counter, m)?)?;
     m.add_class::<PyDataRole>()?;
+    m.add_class::<QantDeviceCapability>()?;
     m.add_class::<PyQantMemoryHandle>()?;
     m.add_class::<PyConvWeightsHandle>()?;
     m.add_class::<PyConvTransposeWeightsHandle>()?;
@@ -722,5 +735,6 @@ fn qant_native_computing_toolkit(m: &Bound<PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(upload, m)?)?;
     m.add_function(wrap_pyfunction!(upload_into, m)?)?;
     m.add_function(wrap_pyfunction!(download, m)?)?;
+    m.add_function(wrap_pyfunction!(dft, m)?)?;
     Ok(())
 }

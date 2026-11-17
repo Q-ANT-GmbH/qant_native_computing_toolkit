@@ -22,7 +22,7 @@ use crate::{
 ///
 /// Returns the normalized feature data.
 pub fn batchnorm2d_fprop<'b>(
-    npu_id: u32,
+    npu_id: i32,
     features: &QantTensor4,
     means: &QantTensor1,
     variances: &QantTensor1,

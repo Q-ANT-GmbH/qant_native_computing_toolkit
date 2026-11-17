@@ -1,5 +1,5 @@
 name: "Install qant native computing driver"
-description: "Downloads the simulated driver .deb from the private driver repo (release asset or dev workflow artifact) and installs it"
+description: "Downloads a simulated driver .deb from a driver repo (release asset or dev workflow artifact) and installs it. Generic over 'repo', so it can install qant_native_computing_driver or qant_native_computing_driver_gen2plus by passing a different repo/output-dir."
 
 inputs:
   os:
@@ -23,6 +23,18 @@ inputs:
     description: "repo that builds the driver .deb"
     required: false
     default: "Q-ANT-GmbH/qant_native_computing_driver"
+  output-dir:
+    description: "Where to download/extract the driver package to. Use a distinct dir per driver if installing more than one in the same job."
+    required: false
+    default: "driver_pkg"
+  artifact-name:
+    description: "Dev workflow artifact name to pull from when source=artifact. Differs per driver repo."
+    required: false
+    default: "qant-native-computing-driver-packages-simulated"
+  generation:
+    description: "Driver generation ('gen2' or 'gen2plus'). Selects which dep/configs/ device configs are installed and where."
+    required: false
+    default: "gen2"
 
 runs:
   using: "composite"
@@ -54,7 +66,8 @@ runs:
 
     # source=release: pull the simulated release bundle with the official gh CLI.
     # Asset name mirrors the driver repo's publish-release workflow:
-    #   qant-native-computing-driver-simulated-<tag>.zip  ->  <os>/qant*.deb
+    #   gen2:     qant-native-computing-driver-simulated-<tag>.zip          ->  <os>/qant*.deb
+    #   gen2plus: qant-native-computing-driver-gen2plus-simulated-<tag>.zip ->  <os>/qant*.deb
     - name: download simulated release bundle
       if: ${{ inputs.source == 'release' }}
       shell: bash
@@ -62,13 +75,18 @@ runs:
         GH_TOKEN: ${{ inputs.token }}
         REPO: ${{ inputs.repo }}
         VERSION: ${{ inputs.version }}
+        GENERATION: ${{ inputs.generation }}
       run: |
         set -euo pipefail
-        BUNDLE="qant-native-computing-driver-simulated-${VERSION}.zip"
+        case "$GENERATION" in
+          gen2)     BUNDLE="qant-native-computing-driver-simulated-${VERSION}.zip" ;;
+          gen2plus) BUNDLE="qant-native-computing-driver-gen2plus-simulated-${VERSION}.zip" ;;
+          *) echo "Unknown generation '$GENERATION' (expected gen2 or gen2plus)" >&2; exit 1 ;;
+        esac
         # Explicit tag downloads the pre-release regardless of "Latest" status.
         gh release download "$VERSION" --repo "$REPO" --pattern "$BUNDLE" --dir . --clobber
-        mkdir -p driver_pkg
-        unzip -o "$BUNDLE" -d driver_pkg
+        mkdir -p "${{ inputs.output-dir }}"
+        unzip -o "$BUNDLE" -d "${{ inputs.output-dir }}"
 
     # source=artifact: pull the simulated dev workflow artifact (beware: can expire on driver side)
     # Same nested layout as the release bundle: <os>/qant*.deb
@@ -79,18 +97,26 @@ runs:
         github-token: ${{ inputs.token }}
         repository: ${{ inputs.repo }}
         run-id: ${{ inputs.run-id }}
-        name: qant-native-computing-driver-packages-simulated
-        path: driver_pkg
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.output-dir }}
 
     - name: install driver
       shell: bash
       # Both sources unpack to <os>/qant*.deb.
-      run: apt install -y ./driver_pkg/${{ steps.os_name.outputs.OS_NAME_WO_COLON }}/qant*.deb
+      run: apt install -y ./${{ inputs.output-dir }}/${{ steps.os_name.outputs.OS_NAME_WO_COLON }}/qant*.deb
 
     - name: install device configs (simulated npus)
       shell: bash
-      # The driver is looking for the npu device configs in /etc/qant_native_computing_driver
+      # The driver is looking for the npu device configs in
+      #   gen2:     /etc/qant-native-computing-driver/          (dep/configs/device_config_ng2_*)
+      #   gen2plus: /etc/qant-native-computing-driver-gen2plus/ (dep/configs/device_config_ng2p_*)
       # We install three dummy configs for the CI tests
       run: |
-        mkdir -p /etc/qant-native-computing-driver/
-        cp dep/configs/* /etc/qant-native-computing-driver/
+        set -euo pipefail
+        case "${{ inputs.generation }}" in
+          gen2)     PREFIX="device_config_ng2_";  CONFIG_DIR="/etc/qant-native-computing-driver" ;;
+          gen2plus) PREFIX="device_config_ng2p_"; CONFIG_DIR="/etc/qant-native-computing-driver-gen2plus" ;;
+          *) echo "Unknown generation '${{ inputs.generation }}' (expected gen2 or gen2plus)" >&2; exit 1 ;;
+        esac
+        mkdir -p "$CONFIG_DIR/"
+        cp dep/configs/${PREFIX}* "$CONFIG_DIR/"

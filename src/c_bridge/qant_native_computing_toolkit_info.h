@@ -2,17 +2,19 @@
 #define QANT_NATIVE_COMPUTING_TOOLKIT_INFO_H
 
 #define QANT_NATIVE_COMPUTING_TOOLKIT_MAJOR_VERSION 2
-#define QANT_NATIVE_COMPUTING_TOOLKIT_MINOR_VERSION 4
+#define QANT_NATIVE_COMPUTING_TOOLKIT_MINOR_VERSION 5
 
-// String-like parameters and return values are represented as arrays of char with this length.
-#define QANT_NATIVE_COMPUTING_TOOLKIT_DEFAULT_CHAR_ARR_LENGTH 1024
-
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include "qant_native_computing_toolkit_generic.h"
 
 #ifdef __cplusplus
 namespace qant_native_computing_toolkit::info
 {
+    using ::qant_native_computing_toolkit::generic::QantDeviceCapability;
+
     extern "C"
     {
 #endif
@@ -33,11 +35,13 @@ namespace qant_native_computing_toolkit::info
          * @brief Gets detailed information about the Q.ANT native computing driver and its direct dependencies.
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
          * @param output A preallocated memory to store the info string into.
          * @param len The maximum length of the string.
-         * @return 0 if successful, negative error code otherwise.
+         * @return 0 if successful, -1 otherwise. The error message is printed to stderr.
          */
-        int get_driver_info(const uint32_t npu_id, char *output, size_t len);
+        int get_driver_info(const int32_t npu_id, char *output, size_t len);
 
         typedef struct
         {
@@ -64,10 +68,14 @@ namespace qant_native_computing_toolkit::info
          * @brief Get detailed information about the NPU sensors, e.g. temperature.
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
+         * @param out A preallocated struct to store the sensor information into.
+         * Left unchanged on failure.
          *
-         * @return The sensor information as a struct.
+         * @return 0 if successful, -1 otherwise. The error message is printed to stderr.
          */
-        QantSensorInfo get_sensor_info(const uint32_t npu_id);
+        int get_sensor_info(const int32_t npu_id, QantSensorInfo *out);
 
         typedef struct
         {
@@ -80,24 +88,31 @@ namespace qant_native_computing_toolkit::info
          * @brief Gets information about the firmware versions.
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
+         * @param out A preallocated struct to store the version information into.
+         * Left unchanged on failure.
          *
-         * @return The version information as a struct.
+         * @return 0 if successful, -1 otherwise. The error message is printed to stderr.
          */
-        QantVersionInfo get_version_info(const uint32_t npu_id);
+        int get_version_info(const int32_t npu_id, QantVersionInfo *out);
 
         /**
-         * @brief Get all available NPUs
+         * @brief Gets the operations supported by an NPU.
          *
-         * @param idxs_out: Array to place the (pcie-enumeration) idxs of the available NPUs, length: capacity.
-         * @param serials_out: Array to place the NPU serial numbers, length: capacity.
-         * @param capacity: Length of idxs_out, serials_out. Should be chosen at least as large as the expected number of available NPUs.
-         * @param out_count: The actual number of available NPUs.
+         * @param npu_id The identifier of the NPU, e.g. one returned by get_available_npus.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first enumerated
+         * NPU. Values below -1 are invalid.
+         * @param capabilities_out: Array to place the supported operations, length: capacity.
+         * At most 4 (the number of QantDeviceCapability values) are written.
+         * @param capacity: Length of capabilities_out.
+         * @param out_count: The number of supported operations. Also set if capacity is too small.
          *
-         * @return 0 if successful, and a negative error code in case of failure.
+         * @return 0 if successful, -1 otherwise. The error message is printed to stderr.
          */
-        int get_available_npus(
-            uint32_t *idxs_out,
-            char (*serials_out)[QANT_NATIVE_COMPUTING_TOOLKIT_DEFAULT_CHAR_ARR_LENGTH],
+        int get_capabilities(
+            const int32_t npu_id,
+            QantDeviceCapability *capabilities_out,
             size_t capacity,
             size_t *out_count);
 
@@ -105,10 +120,12 @@ namespace qant_native_computing_toolkit::info
          * @brief Reset the performance counters
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
          *
-         * @return 0 if successful, and a negative error code in case of failure.
+         * @return 0 if successful, -1 otherwise. The error message is printed to stderr.
          */
-        int reset_perf_counter(const uint32_t npu_id);
+        int reset_perf_counter(const int32_t npu_id);
 
         /**
          * @brief Struct to hold performance counter information
@@ -124,11 +141,13 @@ namespace qant_native_computing_toolkit::info
          * @brief Gets the performance counters.
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
          *
          * @param out A preallocated memory to store the counter info.
-         * @return 0 if successful, a non-zero code otherwise.
+         * @return 0 if successful, -1 otherwise. The error message is printed to stderr.
          */
-        int get_perf_counter(const uint32_t npu_id, QantPerformanceCounterInfo *out);
+        int get_perf_counter(const int32_t npu_id, QantPerformanceCounterInfo *out);
 
 #ifdef __cplusplus
     } // extern "C"

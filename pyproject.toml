@@ -46,14 +46,14 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
   "Programming Language :: Python :: Implementation :: CPython"
 ]
-version = "2.4.1"
+version = "2.5.0"
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md", "external/dlpack/LICENSE"]
 authors = [{ name = "Q.ANT GmbH", email = "info@qant.de" }]
 dependencies = [
   "numpy >= 1.26",
-  "ml-dtypes >= 0.5.4"
+  "ml-dtypes >= 0.6.0"
 ]
 
 [tool.maturin]

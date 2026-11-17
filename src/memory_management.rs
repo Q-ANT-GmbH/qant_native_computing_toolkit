@@ -14,7 +14,7 @@ pub struct QantMemoryHandle {
 
 impl QantMemoryHandle {
     pub fn allocate(
-        npu_id: u32,
+        npu_id: i32,
         rows: usize,
         cols: usize,
         data_role: QantDataRole,
@@ -30,7 +30,7 @@ impl QantMemoryHandle {
 
     /// Allocates device memory sized for `matrix` and uploads it.
     pub fn from_matrix(
-        npu_id: u32,
+        npu_id: i32,
         matrix: &QantTensor2,
         data_role: QantDataRole,
     ) -> Result<Self, ToolkitError> {

@@ -4,7 +4,7 @@ use crate::{
 };
 
 pub fn linear_fprop<'a, 'b>(
-    npu_id: u32,
+    npu_id: i32,
     flatten_features: &QantTensor2<'a>,
     filter: &QantTensor2<'a>,
 ) -> Result<QantTensor2<'b>, ToolkitError> {
@@ -29,7 +29,7 @@ pub fn linear_fprop<'a, 'b>(
 
 /// Multiplies a matrix m[row, column] with a vector v with batch support
 fn mul_mat_vec_batched(
-    npu_id: u32,
+    npu_id: i32,
     matrix: &[Value],
     n_rows: usize,
     n_columns: usize,

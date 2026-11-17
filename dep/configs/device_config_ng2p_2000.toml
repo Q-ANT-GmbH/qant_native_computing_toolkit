@@ -1,0 +1,21 @@
+dc_port_idx = 0
+ref_chnl_idx = 0
+calibration_interval_mins = 5.0
+# must be wider than the largest v2pi
+dac_range = { start = -28000, end = 28000 }
+expected_v2pi = 40000.0
+pic_temperature_c = 22.0
+laser_temperature_c = 26.0
+laser_osc_current_a = 0.5
+laser_amp_current_a = 0.55
+adc_slow_dac_v = 0.0
+dac_slow_dac_v = 0.0
+adc_delays = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+dac_delays = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+dac_coarse_delays = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+dac_delay_offset = 0
+adc_coarse_delay = 0
+frequency_reduction_fac = 1
+n_averaging_runs_calib = 1
+# simulated chips are noise-free, the phi=0 search needs a fixed global phase
+fixed_channel = { idx = 0, v0 = 0.0 }

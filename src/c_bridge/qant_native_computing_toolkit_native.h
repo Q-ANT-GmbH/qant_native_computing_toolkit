@@ -27,6 +27,8 @@ namespace qant_native_computing_toolkit::native
          * @brief Multiplies two 1D Tensors element-wise.
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
          * @param us The first input tensor. Must be data type bfloat16, same
          * length as vs.
          * @param vs The second input tensor. Must be data type bfloat16, same
@@ -34,7 +36,7 @@ namespace qant_native_computing_toolkit::native
          * @return A 1D tensor containing the elementwise product, same length as
          * input.
          */
-        DLManagedTensorVersioned *mul_npu(const uint32_t npu_id, DLManagedTensorVersioned const *us,
+        DLManagedTensorVersioned *mul_npu(const int32_t npu_id, DLManagedTensorVersioned const *us,
                                           DLManagedTensorVersioned const *vs);
 
         /**
@@ -44,11 +46,13 @@ namespace qant_native_computing_toolkit::native
          * with values between @f$-1@f$ and @f$1@f$, similar to a cosine.
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
          * @param features: A 1D tensor with data type bfloat16.
          * @param weights: A 1D tensor with data type bfloat16, same length as features.
          * @return A 1D tensor containing the result, same shape as input features.
          */
-        DLManagedTensorVersioned *calc_scaled_periodic_nl_fprop(const uint32_t npu_id, DLManagedTensorVersioned const *features, DLManagedTensorVersioned const *weights);
+        DLManagedTensorVersioned *calc_scaled_periodic_nl_fprop(const int32_t npu_id, DLManagedTensorVersioned const *features, DLManagedTensorVersioned const *weights);
 
         /**
          * @brief Performs a linear forward propagation between input features and a
@@ -63,6 +67,8 @@ namespace qant_native_computing_toolkit::native
          * shape <tt>(n_channels_out, n_channels_in)</tt>.
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
          * @param features A 2D tensor with data type bfloat16 and shape
          *        <tt>(n_batches, n_channels_in)</tt>.
          * @param weights A 2D tensor with data type bfloat16 and shape
@@ -70,7 +76,7 @@ namespace qant_native_computing_toolkit::native
          * @return A 2D tensor containing the result of the forward propagation with
          *         shape <tt>(n_batches, n_channels_out)</tt>.
          */
-        DLManagedTensorVersioned *linear_fprop(const uint32_t npu_id, DLManagedTensorVersioned const *features,
+        DLManagedTensorVersioned *linear_fprop(const int32_t npu_id, DLManagedTensorVersioned const *features,
                                                DLManagedTensorVersioned const *weights);
 
         /**
@@ -110,6 +116,24 @@ namespace qant_native_computing_toolkit::native
          */
         int linear_fprop_preloaded(QantMemoryHandle const *features, QantMemoryHandle const *weights,
                                    QantMemoryHandle const *result);
+
+        /**
+         * @brief Performs a batched Discrete Fourier Transform (DFT) on complex input data.
+         *
+         * Each row along the batch dimension is transformed independently via a
+         * forward FFT, complex-to-complex.
+         *
+         * @param npu_id The identifier of the NPU on which to perform the operation.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
+         * @param data A 2D tensor of shape <tt>(n_dfts, dft_size)</tt> with data type
+         *        bcomplex32 (<tt>kDLBcomplex</tt>, 32 bits, 1 lane): each element is a
+         *        complex number stored as two bfloat16 values (real, imaginary).
+         *        <tt>kDLBcomplex</tt> requires DLPack >= 1.4 headers.
+         * @return A 2D tensor with the same shape and data type as \p data,
+         *         containing the DFT result for each row.
+         */
+        DLManagedTensorVersioned *dft(const int32_t npu_id, DLManagedTensorVersioned const *data);
 
 #ifdef __cplusplus
     } // extern "C"

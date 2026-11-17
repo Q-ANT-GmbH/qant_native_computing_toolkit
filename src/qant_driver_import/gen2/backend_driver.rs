@@ -1,6 +1,6 @@
-use crate::qant_driver_import::{
-    C_STRING_DEFAULT_LENGTH, PerformanceCounterInfo, QantDataRole, QantDeviceInfo, QantDriverError,
-    QantDriverHandle,
+use crate::qant_driver_import::dto::{
+    C_STRING_DEFAULT_LENGTH, PerformanceCounterInfo, QantDataRole, QantDeviceCapabilities,
+    QantDeviceInfo, QantDriverError, QantDriverHandle,
 };
 use half::bf16;
 use std::ffi::c_char;
@@ -122,4 +122,9 @@ unsafe extern "C" {
         npu_id: u32,
         out: *mut PerformanceCounterInfo,
     ) -> QantDriverError;
+}
+
+#[link(name = "qant_native_computing_driver")]
+unsafe extern "C" {
+    pub fn qant_driver_get_device_capabilities(npu_id: u32) -> QantDeviceCapabilities;
 }

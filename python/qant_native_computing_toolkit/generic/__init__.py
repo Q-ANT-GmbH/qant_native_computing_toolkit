@@ -1,4 +1,5 @@
 from .._backend import DataRole as DataRole
+from .._backend import QantDeviceCapability as QantDeviceCapability
 from .._wrapper import allocate as allocate
 from .._wrapper import download as download
 from .._wrapper import get_available_npus as get_available_npus

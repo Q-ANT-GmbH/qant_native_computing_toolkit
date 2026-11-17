@@ -92,6 +92,13 @@ Do not drop the `--index-url` on Linux or Windows: PyPI serves a torch that bund
 MATURIN_PEP517_ARGS="--features cpu-backend" pip install -e .
 ```
 
+`maturin develop` places the compiled backend next to the Python sources in `python/qant_native_computing_toolkit/`, but it never removes backends from earlier builds. The backend is built against the stable ABI (`_backend.abi3.so`), while older versions of the toolkit produced a version-specific `_backend.cpython-3XX-….so`. Python prefers the version-specific file, so after building an older branch a stale backend would shadow the new one. The package refuses to import if it finds more than one backend. To fix it, delete them and rebuild:
+
+```sh
+rm -f python/qant_native_computing_toolkit/_backend.*.so python/qant_native_computing_toolkit/_backend.*.pyd
+maturin develop -F cpu-backend
+```
+
 ## Repository layout
 
 | Path | Contents |

@@ -2,15 +2,20 @@ use crate::{
     data_structures::{QantTensor1, QantTensor2, QantTensor4},
     errors::ToolkitError,
     global_settings::Value,
-    toolkit_error,
+    qant_driver_import, toolkit_error,
 };
 
-/// Add a bias to the feature_data
+/// Add a bias to the feature_data.
+///
+/// This operation is not dispatched to any NPU. `npu_id` is
+/// accepted for API consistency and resolved like for all other operations:
+/// it must be `-1` (auto-select) or the id of an available NPU.
 pub fn add_bias_fprop<'a, 'b>(
-    _npu_id: u32,
+    npu_id: i32,
     feature_data: &QantTensor2<'a>, // shape (batches, flattened_features)
     bias_data: &QantTensor1<'a>,    // shape (flattened_features)
 ) -> Result<QantTensor2<'b>, ToolkitError> {
+    qant_driver_import::check_npu_id(npu_id)?;
     if feature_data.shape()[1] != bias_data.len() {
         return Err(toolkit_error!(
             "feature_data and bias_data must have compatible shapes, got {0:?} and {1:?}",
@@ -31,12 +36,17 @@ pub fn add_bias_fprop<'a, 'b>(
     QantTensor2::new(result_data, *feature_data.shape())
 }
 
-/// Add a bias to the image
+/// Add a bias to the image.
+///
+/// This operation is not dispatched to any NPU. `npu_id` is
+/// accepted for API consistency and resolved like for all other operations:
+/// it must be `-1` (auto-select) or the id of an available NPU.
 pub fn add_bias_for_conv2d_fprop<'a, 'b>(
-    _npu_id: u32,
+    npu_id: i32,
     image: &QantTensor4<'a>,
     bias_data: &QantTensor1<'a>,
 ) -> Result<QantTensor4<'b>, ToolkitError> {
+    qant_driver_import::check_npu_id(npu_id)?;
     let &[_, image_channels, image_height, image_width] = image.shape();
 
     if image_channels != bias_data.len() {

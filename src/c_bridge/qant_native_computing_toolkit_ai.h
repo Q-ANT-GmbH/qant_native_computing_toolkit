@@ -20,23 +20,27 @@ namespace qant_native_computing_toolkit::ai
          * @brief Element-wise addition. Supports batched input.
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
          * @param features: A 2D tensor with data type bfloat16 and shape (n_batches, n_channels).
          * @param bias: A 1D tensor with data type bfloat16 and shape (n_channels)
          * @return A 2D tensor, same shape as inputs.
          */
-        DLManagedTensorVersioned *add_bias_fprop(const uint32_t npu_id, DLManagedTensorVersioned const *features,
+        DLManagedTensorVersioned *add_bias_fprop(const int32_t npu_id, DLManagedTensorVersioned const *features,
                                                  DLManagedTensorVersioned const *bias);
 
         /**
          * @brief Element-wise addition. Specifically used for conv2d.
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
          * @param features: A 4D tensor with data type bfloat16 and shape (n_batches,
          * n_channels, height, width)
          * @param bias: A 1D tensor with data type bfloat16 and shape (n_channels)
          * @return A 4D tensor containing the result of the addition, same shape as the input features.
          */
-        DLManagedTensorVersioned *add_bias_for_conv2d_fprop(const uint32_t npu_id, DLManagedTensorVersioned const *features,
+        DLManagedTensorVersioned *add_bias_for_conv2d_fprop(const int32_t npu_id, DLManagedTensorVersioned const *features,
                                                             DLManagedTensorVersioned const *bias);
 
         /**
@@ -46,10 +50,12 @@ namespace qant_native_computing_toolkit::ai
          * https://en.wikipedia.org/wiki/Rectifier_(neural_networks)
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
          * @param features: A 1D tensor with data type bfloat16.
          * @return A 1D array containing the result of the ReLU operation.
          */
-        DLManagedTensorVersioned *relu_fprop(const uint32_t npu_id, DLManagedTensorVersioned const *features);
+        DLManagedTensorVersioned *relu_fprop(const int32_t npu_id, DLManagedTensorVersioned const *features);
 
         /**
          * @brief Performs a forward pass through a Sigmoid layer.
@@ -58,10 +64,12 @@ namespace qant_native_computing_toolkit::ai
          * https://en.wikipedia.org/wiki/Sigmoid_function
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
          * @param features: A 1D tensor with data type bfloat16.
          * @return A 1D array containing the result of the Sigmoid operation with the same shape as the input.
          */
-        DLManagedTensorVersioned *sigmoid_fprop(const uint32_t npu_id, DLManagedTensorVersioned const *features);
+        DLManagedTensorVersioned *sigmoid_fprop(const int32_t npu_id, DLManagedTensorVersioned const *features);
 
         /**
          * @brief Performs a forward pass through a Softmax layer.
@@ -70,15 +78,19 @@ namespace qant_native_computing_toolkit::ai
          * https://en.wikipedia.org/wiki/Softmax_function
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
          * @param features: A 2D tensor with data type bfloat16 and shape (1, N).
          * @return A 2D tensor, containing the result of the Softmax operation with the same shape as the input.
          */
-        DLManagedTensorVersioned *softmax_fprop(const uint32_t npu_id, DLManagedTensorVersioned const *features);
+        DLManagedTensorVersioned *softmax_fprop(const int32_t npu_id, DLManagedTensorVersioned const *features);
 
         /**
          * @brief Performs a forward pass through a convolution layer.
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
          * @param features: A 4D tensor with data type bfloat16 and shape (n_batches,
          * in_channels, height, width)
          * @param weights: A 4D tensor with data type bfloat16 and shape (out_channels,
@@ -89,7 +101,7 @@ namespace qant_native_computing_toolkit::ai
          * @param dilation: Dilation ("zoom out") of the kernel.
          * @return A 4D tensor containing the result of the convolution with shape (n_batches, out_channels, height_out, width_out)
          */
-        DLManagedTensorVersioned *conv_fprop(const uint32_t npu_id, DLManagedTensorVersioned const *features,
+        DLManagedTensorVersioned *conv_fprop(const int32_t npu_id, DLManagedTensorVersioned const *features,
                                              DLManagedTensorVersioned const *weights,
                                              size_t const padding,
                                              size_t const stride,
@@ -99,6 +111,8 @@ namespace qant_native_computing_toolkit::ai
          * @brief Performs a forward pass through a transposed convolution layer.
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
          * @param features: A 4D tensor with data type bfloat16 and shape (n_batches,
          * in_channels, height, width)
          * @param weights: A 4D tensor with data type bfloat16 and shape (in_channels, out_channels, height, width)
@@ -109,7 +123,7 @@ namespace qant_native_computing_toolkit::ai
          * @param output_padding: Padding for the returned features.
          * @return A 4D tensor containing the result of the transpose convolution with shape (n_batches, out_channels, height_out, width_out)
          */
-        DLManagedTensorVersioned *conv_transpose_fprop(const uint32_t npu_id, DLManagedTensorVersioned const *features,
+        DLManagedTensorVersioned *conv_transpose_fprop(const int32_t npu_id, DLManagedTensorVersioned const *features,
                                                        DLManagedTensorVersioned const *weights,
                                                        size_t const padding,
                                                        size_t const stride,
@@ -129,12 +143,14 @@ namespace qant_native_computing_toolkit::ai
          * multiple calls to conv_fprop_preloaded_weights().
          *
          * @param npu_id The identifier of the NPU on which the weights are stored.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
          * @param weights: A 4D tensor with data type bfloat16 and shape (out_channels,
          * in_channels, height, width)
          * @return An owning pointer to the weights handle, or NULL on error. The caller must
          * release it with conv_weights_free().
          */
-        ConvWeightsHandle *upload_conv_weights(const uint32_t npu_id, DLManagedTensorVersioned const *weights);
+        ConvWeightsHandle *upload_conv_weights(const int32_t npu_id, DLManagedTensorVersioned const *weights);
 
         /**
          * @brief Frees convolution weights previously uploaded with upload_conv_weights().
@@ -178,11 +194,13 @@ namespace qant_native_computing_toolkit::ai
          * across multiple calls to conv_transpose_fprop_preloaded_weights().
          *
          * @param npu_id The identifier of the NPU on which the weights are stored.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
          * @param weights: A 4D tensor with data type bfloat16 and shape (in_channels, out_channels, height, width)
          * @return An owning pointer to the weights handle, or NULL on error. The caller must
          * release it with conv_transpose_weights_free().
          */
-        ConvTransposeWeightsHandle *upload_conv_transpose_weights(const uint32_t npu_id,
+        ConvTransposeWeightsHandle *upload_conv_transpose_weights(const int32_t npu_id,
                                                                   DLManagedTensorVersioned const *weights);
 
         /**
@@ -222,6 +240,8 @@ namespace qant_native_computing_toolkit::ai
          * https://en.wikipedia.org/wiki/Batch_normalization
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
          * @param features: A 4D tensor with data type bfloat16 and shape (n_batches,
          * n_channels, height, width)
          * @param means: A 1D tensor containing the mean values for each feature, with
@@ -235,7 +255,7 @@ namespace qant_native_computing_toolkit::ai
          * @param eps: A small value added to the variance for numerical stability.
          * @return A 4D tensor containing the result of the batchnorm operation with shape (n_batches, n_channels, height, width)
          */
-        DLManagedTensorVersioned *batchnorm2d_fprop(const uint32_t npu_id, DLManagedTensorVersioned const *features,
+        DLManagedTensorVersioned *batchnorm2d_fprop(const int32_t npu_id, DLManagedTensorVersioned const *features,
                                                     DLManagedTensorVersioned const *means,
                                                     DLManagedTensorVersioned const *variances,
                                                     DLManagedTensorVersioned const *weights,
@@ -249,6 +269,8 @@ namespace qant_native_computing_toolkit::ai
          * https://en.wikipedia.org/wiki/Pooling_layer
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
          * @param features: A 4D tensor with data type bfloat16 and shape (n_batches,
          * n_channels, height, width)
          * @param kernel_height: Height of the pooling kernel.
@@ -259,7 +281,7 @@ namespace qant_native_computing_toolkit::ai
          * @return A 4D tensor containing the result of the maxpool operation with shape
          * ([batches], n_channels, output_height, output_width).
          */
-        DLManagedTensorVersioned *maxpool2d_fprop(const uint32_t npu_id, DLManagedTensorVersioned const *features,
+        DLManagedTensorVersioned *maxpool2d_fprop(const int32_t npu_id, DLManagedTensorVersioned const *features,
                                                   size_t const kernel_height,
                                                   size_t const kernel_width,
                                                   size_t const padding,
@@ -272,6 +294,8 @@ namespace qant_native_computing_toolkit::ai
          * https://en.wikipedia.org/wiki/Pooling_layer
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
          * @param features: A 4D tensor with data type bfloat16 and shape (n_batches,
          * n_channels, height, width)
          * @param kernel_height: Height of the pooling kernel.
@@ -282,7 +306,7 @@ namespace qant_native_computing_toolkit::ai
          * @param count_include_pad: When True, will include the zero-padding in the averaging calculation.
          * @return A 4D tensor with shape (n_batches, n_channels, height, width)
          */
-        DLManagedTensorVersioned *avgpool2d_fprop(const uint32_t npu_id, DLManagedTensorVersioned const *features,
+        DLManagedTensorVersioned *avgpool2d_fprop(const int32_t npu_id, DLManagedTensorVersioned const *features,
                                                   size_t const kernel_height,
                                                   size_t const kernel_width,
                                                   size_t const padding,
@@ -295,13 +319,15 @@ namespace qant_native_computing_toolkit::ai
          * Only works for symmetric input and output sizes. Input size has to be integer multiple of output size.
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
          * @param features: A 4D tensor with data type bfloat16 and shape (n_batches,
          * n_channels, height, width)
          * @param output_height: Height of the output.
          * @param output_width: Width of the output.
          * @return A 4D tensor with shape (n_batches, n_channels, output_height, output_width)
          */
-        DLManagedTensorVersioned *adaptive_maxpool2d_fprop(const uint32_t npu_id, DLManagedTensorVersioned const *features,
+        DLManagedTensorVersioned *adaptive_maxpool2d_fprop(const int32_t npu_id, DLManagedTensorVersioned const *features,
                                                            size_t const output_height,
                                                            size_t const output_width);
 
@@ -311,13 +337,15 @@ namespace qant_native_computing_toolkit::ai
          * Only works for symmetric input and output sizes. Input size has to be integer multiple of output size.
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
          * @param features: A 4D tensor with data type bfloat16 and shape (n_batches,
          * n_channels, height, width)
          * @param output_height: Height of the output.
          * @param output_width: Width of the output.
          * @return A 4D tensor with shape (n_batches, n_channels, output_height, output_width)
          */
-        DLManagedTensorVersioned *adaptive_avgpool2d_fprop(const uint32_t npu_id, DLManagedTensorVersioned const *features,
+        DLManagedTensorVersioned *adaptive_avgpool2d_fprop(const int32_t npu_id, DLManagedTensorVersioned const *features,
                                                            size_t const output_height,
                                                            size_t const output_width);
 
@@ -335,13 +363,15 @@ namespace qant_native_computing_toolkit::ai
          * periodic optical nonlinearity.
          *
          * @param npu_id The identifier of the NPU on which to perform the operation.
+         * QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+         * supports this operation. Values below -1 are invalid.
          * @param features: A 2D input tensor with shape (n_batches, n_channels_in), with data type bfloat16.
          * @param phis: A 3D tensor of phase offsets, shape (n_channels_out, n_channels_in, n_ks), with data type bfloat16.
          * @param ampls: A 3D array of amplitudes, same shape as phis, with data type bfloat16.
          * @param ks: A 1D tensor of frequency components, shape (n_ks), with data type bfloat16.
          * @return The result of the KAN layer with shape (n_batches, n_channels_out), with data type bfloat16.
          */
-        DLManagedTensorVersioned *calc_kan_layer_fprop(const uint32_t npu_id, DLManagedTensorVersioned const *features,
+        DLManagedTensorVersioned *calc_kan_layer_fprop(const int32_t npu_id, DLManagedTensorVersioned const *features,
                                                        DLManagedTensorVersioned const *phis,
                                                        DLManagedTensorVersioned const *ampls,
                                                        DLManagedTensorVersioned const *ks);

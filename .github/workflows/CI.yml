@@ -13,13 +13,19 @@ on:
 # If driver is available, get it from this source:
 env:
   # 'release' (pinned by tag) or 'artifact' (pinned by run id)
-  DRIVER_SOURCE: release 
-  # release tag, used when DRIVER_SOURCE=release      
-  DRIVER_VERSION: v2.4.1
-  # driver workflow run id, used when DRIVER_SOURCE=artifact    
+  DRIVER_GEN2_SOURCE: release
+  # release tag, used when DRIVER_GEN2_SOURCE=release
+  DRIVER_GEN2_VERSION: v2.5.0
+  # driver workflow run id, used when DRIVER_GEN2_SOURCE=artifact
   # -> https://github.com/Q-ANT-GmbH/qant_native_computing_driver/actions/runs/36992977797
-  DRIVER_RUN_ID: "36992977797"
-  
+  DRIVER_GEN2_RUN_ID: "41432564786"
+
+  # --- qant_native_computing_driver_gen2plus (separate private repo) ---
+  DRIVER_GEN2PLUS_SOURCE: release
+  DRIVER_GEN2PLUS_VERSION: "v0.1.0"
+  # driver workflow run id, used when DRIVER_GEN2PLUS_SOURCE=artifact
+  DRIVER_GEN2PLUS_RUN_ID: "42646606733"
+
 
 jobs:
   # If the repo does not have access to the driver, do not run tests that require the driver.
@@ -28,9 +34,12 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       features: ${{ steps.check_driver_available.outputs.features }}
-      driver_source: ${{ steps.pin_driver_version.outputs.source }}
-      driver_version: ${{ steps.pin_driver_version.outputs.version }}
-      driver_run_id: ${{ steps.pin_driver_version.outputs.run_id }}
+      driver_gen2_source: ${{ steps.pin_gen2_driver_version.outputs.source }}
+      driver_gen2_version: ${{ steps.pin_gen2_driver_version.outputs.version }}
+      driver_gen2_run_id: ${{ steps.pin_gen2_driver_version.outputs.run_id }}
+      driver_gen2plus_source: ${{ steps.pin_gen2plus_driver_version.outputs.source }}
+      driver_gen2plus_version: ${{ steps.pin_gen2plus_driver_version.outputs.version }}
+      driver_gen2plus_run_id: ${{ steps.pin_gen2plus_driver_version.outputs.run_id }}
     steps:
       - id: check_driver_available
         env:
@@ -44,39 +53,54 @@ jobs:
             echo "Driver secret absent -> cpu-backend only."
             echo 'features=["cpu-backend"]' >> "$GITHUB_OUTPUT"
           fi
-      - id: pin_driver_version
+      - id: pin_gen2_driver_version
         run: |
-          echo "source=$DRIVER_SOURCE"   >> "$GITHUB_OUTPUT"
-          echo "version=$DRIVER_VERSION" >> "$GITHUB_OUTPUT"
-          echo "run_id=$DRIVER_RUN_ID"   >> "$GITHUB_OUTPUT"
-  
+          echo "source=$DRIVER_GEN2_SOURCE"   >> "$GITHUB_OUTPUT"
+          echo "version=$DRIVER_GEN2_VERSION" >> "$GITHUB_OUTPUT"
+          echo "run_id=$DRIVER_GEN2_RUN_ID"   >> "$GITHUB_OUTPUT"
+      - id: pin_gen2plus_driver_version
+        run: |
+          echo "source=$DRIVER_GEN2PLUS_SOURCE"   >> "$GITHUB_OUTPUT"
+          echo "version=$DRIVER_GEN2PLUS_VERSION" >> "$GITHUB_OUTPUT"
+          echo "run_id=$DRIVER_GEN2PLUS_RUN_ID"   >> "$GITHUB_OUTPUT"
+
   workflow_rust:
     needs: gate
     uses: ./.github/workflows/workflow_rust.yml
     secrets: inherit
     with:
       features: ${{ needs.gate.outputs.features }}
-      driver_source: ${{ needs.gate.outputs.driver_source }}
-      driver_version: ${{ needs.gate.outputs.driver_version }}
-      driver_run_id: ${{ needs.gate.outputs.driver_run_id }}
+      driver_gen2_source: ${{ needs.gate.outputs.driver_gen2_source }}
+      driver_gen2_version: ${{ needs.gate.outputs.driver_gen2_version }}
+      driver_gen2_run_id: ${{ needs.gate.outputs.driver_gen2_run_id }}
+      driver_gen2plus_source: ${{ needs.gate.outputs.driver_gen2plus_source }}
+      driver_gen2plus_version: ${{ needs.gate.outputs.driver_gen2plus_version }}
+      driver_gen2plus_run_id: ${{ needs.gate.outputs.driver_gen2plus_run_id }}
   workflow_python:
     needs: [gate, workflow_rust]
     uses: ./.github/workflows/workflow_python.yml
     secrets: inherit
     with:
       features: ${{ needs.gate.outputs.features }}
-      driver_source: ${{ needs.gate.outputs.driver_source }}
-      driver_version: ${{ needs.gate.outputs.driver_version }}
-      driver_run_id: ${{ needs.gate.outputs.driver_run_id }}
+      driver_gen2_source: ${{ needs.gate.outputs.driver_gen2_source }}
+      driver_gen2_version: ${{ needs.gate.outputs.driver_gen2_version }}
+      driver_gen2_run_id: ${{ needs.gate.outputs.driver_gen2_run_id }}
+      driver_gen2plus_source: ${{ needs.gate.outputs.driver_gen2plus_source }}
+      driver_gen2plus_version: ${{ needs.gate.outputs.driver_gen2plus_version }}
+      driver_gen2plus_run_id: ${{ needs.gate.outputs.driver_gen2plus_run_id }}
   workflow_C:
     needs: [gate, workflow_rust]
     uses: ./.github/workflows/workflow_c.yml
     secrets: inherit
     with:
       features: ${{ needs.gate.outputs.features }}
-      driver_source: ${{ needs.gate.outputs.driver_source }}
-      driver_version: ${{ needs.gate.outputs.driver_version }}
-      driver_run_id: ${{ needs.gate.outputs.driver_run_id }}
+      driver_gen2_source: ${{ needs.gate.outputs.driver_gen2_source }}
+      driver_gen2_version: ${{ needs.gate.outputs.driver_gen2_version }}
+      driver_gen2_run_id: ${{ needs.gate.outputs.driver_gen2_run_id }}
+      driver_gen2plus_source: ${{ needs.gate.outputs.driver_gen2plus_source }}
+      driver_gen2plus_version: ${{ needs.gate.outputs.driver_gen2plus_version }}
+      driver_gen2plus_run_id: ${{ needs.gate.outputs.driver_gen2plus_run_id }}
+
   workflow_licenses:
     uses: ./.github/workflows/workflow_licenses.yml
   # publish C + Python API docs to GitHub Pages

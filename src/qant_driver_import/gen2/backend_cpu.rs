@@ -9,9 +9,9 @@
  * where the full driver stack is unnecessary.
  */
 
-use crate::qant_driver_import::{
-    C_STRING_DEFAULT_LENGTH, PerformanceCounterInfo, QantDataRole, QantDeviceInfo, QantDriverError,
-    QantDriverHandle, QantVersionInfo, SensorInfo,
+use crate::qant_driver_import::dto::{
+    C_STRING_DEFAULT_LENGTH, PerformanceCounterInfo, QantDataRole, QantDeviceCapabilities,
+    QantDeviceInfo, QantDriverError, QantDriverHandle,
 };
 use half::bf16;
 use num_traits::Float;
@@ -20,23 +20,8 @@ use std::ffi::c_char;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-fn return_success() -> QantDriverError {
-    QantDriverError {
-        code: 0,
-        message: [0_i8; C_STRING_DEFAULT_LENGTH],
-    }
-}
-
-fn return_error(msg: &str) -> QantDriverError {
-    let mut message = [0_i8; C_STRING_DEFAULT_LENGTH];
-    let copy_len = C_STRING_DEFAULT_LENGTH.min(msg.len());
-    message[..copy_len]
-        .iter_mut()
-        .zip(msg.as_bytes().iter())
-        .for_each(|(dst, &src)| *dst = src as i8);
-
-    QantDriverError { code: -1, message }
-}
+/// Ids of the simulated Gen2 NPUs.
+pub const CPU_BACKEND_NPU_IDS: [u32; 3] = [0, 1, 2];
 
 /// A block of simulated device memory, identified by an opaque handle.
 struct CpuMemoryBlock {
@@ -70,25 +55,15 @@ fn next_handle() -> u64 {
 }
 
 pub unsafe fn qant_driver_init_npu(_: u32) -> QantDriverError {
-    return_success()
+    QantDriverError::success()
 }
 
 pub unsafe fn qant_driver_release_npu(_: u32) -> QantDriverError {
-    return_success()
+    QantDriverError::success()
 }
 
 pub unsafe fn qant_driver_setup_logging(_: *const c_char, _: i32) -> QantDriverError {
-    const MSG: &[u8] = b"logging not available for cpu-backend";
-
-    let copy_len = C_STRING_DEFAULT_LENGTH.min(MSG.len());
-    let mut message = [0_i8; C_STRING_DEFAULT_LENGTH];
-
-    message[..copy_len]
-        .iter_mut()
-        .zip(MSG.iter())
-        .for_each(|(dst, &src)| *dst = src as i8);
-
-    QantDriverError { code: -1, message }
+    QantDriverError::error("logging not available for cpu-backend")
 }
 
 pub unsafe extern "C" fn qant_driver_mul_npu(
@@ -105,7 +80,7 @@ pub unsafe extern "C" fn qant_driver_mul_npu(
         output[i] = us[i] * vs[i];
     }
 
-    return_success()
+    QantDriverError::success()
 }
 
 pub unsafe extern "C" fn qant_driver_mul_matrix_vec_batched(
@@ -134,7 +109,7 @@ pub unsafe extern "C" fn qant_driver_mul_matrix_vec_batched(
         }
     }
 
-    return_success()
+    QantDriverError::success()
 }
 
 pub unsafe extern "C" fn qant_driver_scaled_periodic_nl_npu(
@@ -155,7 +130,7 @@ pub unsafe extern "C" fn qant_driver_scaled_periodic_nl_npu(
         output[i] = u.cos() * v;
     }
 
-    return_success()
+    QantDriverError::success()
 }
 
 pub unsafe fn qant_driver_allocate(
@@ -178,26 +153,26 @@ pub unsafe fn qant_driver_allocate(
         *out_handle = QantDriverHandle { npu_id, key };
     }
 
-    return_success()
+    QantDriverError::success()
 }
 
 pub unsafe fn qant_driver_free(handle: QantDriverHandle) -> QantDriverError {
     match lock_store().remove(&handle.key) {
-        Some(_) => return_success(),
-        None => return_error("invalid memory handle"),
+        Some(_) => QantDriverError::success(),
+        None => QantDriverError::error("invalid memory handle"),
     }
 }
 
 pub unsafe fn qant_driver_upload(handle: QantDriverHandle, data_c: *const bf16) -> QantDriverError {
     let mut store = lock_store();
     let Some(block) = store.get_mut(&handle.key) else {
-        return return_error("invalid memory handle");
+        return QantDriverError::error("invalid memory handle");
     };
 
     let src = unsafe { std::slice::from_raw_parts(data_c, block.rows * block.cols) };
     block.data.copy_from_slice(src);
 
-    return_success()
+    QantDriverError::success()
 }
 
 pub unsafe fn qant_driver_download(
@@ -206,13 +181,13 @@ pub unsafe fn qant_driver_download(
 ) -> QantDriverError {
     let store = lock_store();
     let Some(block) = store.get(&handle.key) else {
-        return return_error("invalid memory handle");
+        return QantDriverError::error("invalid memory handle");
     };
 
     let dst = unsafe { std::slice::from_raw_parts_mut(output_c, block.rows * block.cols) };
     dst.copy_from_slice(&block.data);
 
-    return_success()
+    QantDriverError::success()
 }
 
 pub unsafe fn qant_driver_mul_matrix_vec_batched_mem(
@@ -231,33 +206,33 @@ pub unsafe fn qant_driver_mul_matrix_vec_batched_mem(
         store.get(&handle_result.key),
     )
     else {
-        return return_error("invalid memory handle");
+        return QantDriverError::error("invalid memory handle");
     };
 
     if matrix_cpu_memory_block.data_role != QantDataRole::Weights {
-        return return_error("data_role of matrix memory block is not Weights");
+        return QantDriverError::error("data_role of matrix memory block is not Weights");
     }
     if vector_cpu_memory_block.data_role != QantDataRole::Features {
-        return return_error("data_role of vector memory block is not Features");
+        return QantDriverError::error("data_role of vector memory block is not Features");
     }
     if result_cpu_memory_block.data_role != QantDataRole::Features {
-        return return_error("data_role of result memory block is not Features");
+        return QantDriverError::error("data_role of result memory block is not Features");
     }
 
     if matrix_cpu_memory_block.cols != vector_cpu_memory_block.cols {
-        return return_error(&format!(
+        return QantDriverError::error(&format!(
             "matrix cols ({}) does not match vector cols ({})",
             matrix_cpu_memory_block.cols, vector_cpu_memory_block.cols
         ));
     }
     if result_cpu_memory_block.rows != vector_cpu_memory_block.rows {
-        return return_error(&format!(
+        return QantDriverError::error(&format!(
             "result memory block rows ({}) does not match vector rows ({})",
             result_cpu_memory_block.rows, vector_cpu_memory_block.rows
         ));
     }
     if result_cpu_memory_block.cols != matrix_cpu_memory_block.rows {
-        return return_error(&format!(
+        return QantDriverError::error(&format!(
             "result memory block cols ({}) does not match matrix rows ({})",
             result_cpu_memory_block.cols, matrix_cpu_memory_block.rows
         ));
@@ -283,12 +258,12 @@ pub unsafe fn qant_driver_mul_matrix_vec_batched_mem(
         }
     }
     let Some(result_cpu_memory_block) = store.get_mut(&handle_result.key) else {
-        return return_error("invalid memory handle");
+        return QantDriverError::error("invalid memory handle");
     };
 
     result_cpu_memory_block.data = result;
 
-    return_success()
+    QantDriverError::success()
 }
 
 pub unsafe fn qant_driver_get_version(_: u32, output: *mut c_char, len: usize) -> QantDriverError {
@@ -300,40 +275,11 @@ pub unsafe fn qant_driver_get_version(_: u32, output: *mut c_char, len: usize) -
         output[n] = 0; // NUL terminator
     }
 
-    return_success()
+    QantDriverError::success()
 }
 
 pub unsafe fn qant_driver_get_device_info(_: u32) -> QantDeviceInfo {
-    QantDeviceInfo {
-        sensor_info: SensorInfo {
-            temp_pd1: 35.0,
-            temp_pd2: 35.0,
-            temp_pd3: 35.0,
-            temp_dac_1: 35.0,
-            temp_dac_2: 35.0,
-            voltage_1v8: 1.8,
-            voltage_3v3: 3.3,
-            voltage_6v2: 6.2,
-            voltage_6v0_1: 6.0,
-            voltage_6v0_2: 6.0,
-            voltage_6v5: 6.5,
-            voltage_8v0_1: 8.0,
-            voltage_8v0_2: 8.0,
-            voltage_12v: 12.0,
-            voltage_12v5: 12.5,
-            voltage_n12v5: -12.5,
-            current_12v: 8.0,
-        },
-        version_info: QantVersionInfo {
-            fw_version: [0; C_STRING_DEFAULT_LENGTH],
-            zephyr_version: [0; C_STRING_DEFAULT_LENGTH],
-            board_serial_no: [0; C_STRING_DEFAULT_LENGTH],
-        },
-        error: QantDriverError {
-            code: 0,
-            message: [0; C_STRING_DEFAULT_LENGTH],
-        },
-    }
+    QantDeviceInfo::simulated()
 }
 
 pub unsafe fn qant_driver_get_available_npus(
@@ -344,31 +290,32 @@ pub unsafe fn qant_driver_get_available_npus(
 ) -> QantDriverError {
     unsafe {
         if capacity == 0 {
-            return QantDriverError {
-                code: 1,
-                message: [0_i8; C_STRING_DEFAULT_LENGTH],
-            };
+            return QantDriverError::error("capacity must be > 0");
         }
 
+        let count = CPU_BACKEND_NPU_IDS.len().min(capacity);
         let idxs_out = std::slice::from_raw_parts_mut(idxs_out, capacity);
-        idxs_out[0] = 0;
         let serials_out = std::slice::from_raw_parts_mut(
             serials_out as *mut [u8; C_STRING_DEFAULT_LENGTH],
             capacity,
         );
-        let bytes = b"cpu_backend";
         let max_len = C_STRING_DEFAULT_LENGTH.saturating_sub(1);
-        let n = bytes.len().min(max_len);
-        serials_out[0][..n].copy_from_slice(&bytes[..n]);
-        serials_out[0][n] = 0; // NUL terminator
-        *out_count = 1;
+        for (i, &id) in CPU_BACKEND_NPU_IDS.iter().take(count).enumerate() {
+            idxs_out[i] = id;
+            let serial = format!("cpu_backend_{id}");
+            let bytes = serial.as_bytes();
+            let n = bytes.len().min(max_len);
+            serials_out[i][..n].copy_from_slice(&bytes[..n]);
+            serials_out[i][n] = 0; // NUL terminator
+        }
+        *out_count = count;
     }
 
-    return_success()
+    QantDriverError::success()
 }
 
 pub unsafe fn qant_driver_reset_perf_counter(_: u32) -> QantDriverError {
-    return_success()
+    QantDriverError::success()
 }
 
 pub unsafe fn qant_driver_get_perf_counter(
@@ -376,10 +323,27 @@ pub unsafe fn qant_driver_get_perf_counter(
     out: *mut PerformanceCounterInfo,
 ) -> QantDriverError {
     unsafe {
-        *out = PerformanceCounterInfo {
-            timebased_counter: 0.0,
-            stalling_counter: 0.0,
-        };
+        *out = PerformanceCounterInfo::default();
     }
-    return_success()
+    QantDriverError::success()
+}
+
+pub fn qant_driver_get_device_capabilities(npu_id: u32) -> QantDeviceCapabilities {
+    if CPU_BACKEND_NPU_IDS.contains(&npu_id) {
+        QantDeviceCapabilities {
+            mul: true,
+            non_lin: true,
+            dft: false,
+            mem_handling: true,
+            error: QantDriverError::success(),
+        }
+    } else {
+        QantDeviceCapabilities {
+            mul: false,
+            non_lin: false,
+            dft: false,
+            mem_handling: false,
+            error: QantDriverError::error("NPU not available"),
+        }
+    }
 }

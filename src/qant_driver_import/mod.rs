@@ -1,272 +1,322 @@
-use crate::{errors::ToolkitError, toolkit_error, utils};
+use crate::{errors::ToolkitError, toolkit_error};
 use half::bf16;
-use std::{
-    collections::HashMap,
-    ffi::{CString, c_char, c_int},
-};
+use std::ffi::c_char;
 
-#[cfg_attr(feature = "cpu-backend", path = "backend_cpu.rs")]
-#[cfg_attr(not(feature = "cpu-backend"), path = "backend_driver.rs")]
-mod backend;
+pub mod dto;
+pub use dto::{QantDataRole, QantDriverHandle};
+mod device_manager;
+pub(crate) use device_manager::check_npu_id;
+pub use device_manager::{QantDeviceCapability, get_available_npus, get_capabilities};
+mod gen2;
+mod gen2p;
+mod utils;
 
-pub const C_STRING_DEFAULT_LENGTH: usize = 1024;
+/// Sentinel `npu_id` for automatic NPU selection: the lowest-id NPU that
+/// supports the requested operation. Passing an `npu_id` below this
+/// value is invalid and results in an error.
+pub const AUTO_NPU_ID: i32 = -1;
 
-// Mirror the structs from qant_native_computing_driver.h
-// If you encounter errors with passing structs, note that the compiler
-// will not notify you if there are missing fields, it will just take whatever
-// data comes after the valid fields (if owned by the program).
-// So double check all fields to be sure.
-
-#[derive(Debug)]
-#[repr(C)]
-pub struct QantDriverError {
-    pub code: c_int,
-    pub message: [c_char; C_STRING_DEFAULT_LENGTH],
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NPUBackend {
+    Gen2,
+    Gen2p,
 }
 
-#[derive(Debug, Clone)]
-#[repr(C)]
-pub struct SensorInfo {
-    pub temp_pd1: f64,
-    pub temp_pd2: f64,
-    pub temp_pd3: f64,
-    pub temp_dac_1: f64,
-    pub temp_dac_2: f64,
-    pub voltage_1v8: f64,
-    pub voltage_3v3: f64,
-    pub voltage_6v0_1: f64,
-    pub voltage_6v0_2: f64,
-    pub voltage_6v2: f64,
-    pub voltage_6v5: f64,
-    pub voltage_8v0_1: f64,
-    pub voltage_8v0_2: f64,
-    pub voltage_12v: f64,
-    pub voltage_12v5: f64,
-    pub voltage_n12v5: f64,
-    pub current_12v: f64,
-}
-
-#[derive(Debug, Clone)]
-#[repr(C)]
-pub struct QantVersionInfo {
-    pub fw_version: [c_char; C_STRING_DEFAULT_LENGTH],
-    pub zephyr_version: [c_char; C_STRING_DEFAULT_LENGTH],
-    pub board_serial_no: [c_char; C_STRING_DEFAULT_LENGTH],
-}
-
-#[repr(C)]
-#[derive(Debug)]
-pub struct QantDeviceInfo {
-    pub sensor_info: SensorInfo,
-    pub version_info: QantVersionInfo,
-    pub error: QantDriverError,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum QantDataRole {
-    Weights = 0,
-    Features = 1,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-pub struct QantDriverHandle {
-    pub npu_id: u32,
-    pub key: u64,
-}
-
-#[derive(Debug, Clone)]
-pub struct VersionInfo {
-    pub fw_version: String,
-    pub zephyr_version: String,
-    pub board_serial_no: String,
-}
-
-impl VersionInfo {
-    pub fn from_c_struct(info_c: QantVersionInfo) -> Self {
-        Self {
-            fw_version: c_char_to_rust_str(&info_c.fw_version),
-            zephyr_version: c_char_to_rust_str(&info_c.zephyr_version),
-            board_serial_no: c_char_to_rust_str(&info_c.board_serial_no),
+impl NPUBackend {
+    fn get_available_npus(self) -> Result<Vec<(u32, String)>, ToolkitError> {
+        match self {
+            NPUBackend::Gen2 => gen2::get_available_npus(),
+            NPUBackend::Gen2p => gen2p::get_available_npus(),
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct DeviceInfo {
-    pub sensor: SensorInfo,
-    pub version_info: VersionInfo,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone)]
-pub struct PerformanceCounterInfo {
-    pub timebased_counter: f64, // time since last reset (in s)
-    pub stalling_counter: f64,  // time spent in stalling mode (idle mode in s)
-}
-
-fn c_char_to_rust_str(c_chars: &[c_char; C_STRING_DEFAULT_LENGTH]) -> String {
-    let c_str = unsafe { std::ffi::CStr::from_ptr(c_chars.as_ptr()) };
-    c_str.to_string_lossy().to_string()
-}
-
-fn err_to_result(err: QantDriverError) -> Result<(), ToolkitError> {
-    if err.code == 0 {
-        return Ok(());
+    fn get_capabilities(self, npu_id: u32) -> Result<Vec<QantDeviceCapability>, ToolkitError> {
+        match self {
+            NPUBackend::Gen2 => gen2::get_capabilities(npu_id),
+            NPUBackend::Gen2p => gen2p::get_capabilities(npu_id),
+        }
     }
-    Err(ToolkitError::from_str(&c_char_to_rust_str(&err.message)))
+    fn init_npu(self, npu_id: u32) -> Result<(), ToolkitError> {
+        match self {
+            NPUBackend::Gen2 => gen2::init_npu(npu_id),
+            NPUBackend::Gen2p => gen2p::init_npu(npu_id),
+        }
+    }
+    fn release_npu(self, npu_id: u32) -> Result<(), ToolkitError> {
+        match self {
+            NPUBackend::Gen2 => gen2::release_npu(npu_id),
+            NPUBackend::Gen2p => gen2p::release_npu(npu_id),
+        }
+    }
+
+    pub fn mul(self, npu_id: u32, us: &[bf16], vs: &[bf16]) -> Result<Vec<bf16>, ToolkitError> {
+        match self {
+            NPUBackend::Gen2 => gen2::mul(npu_id, us, vs),
+            NPUBackend::Gen2p => Err(toolkit_error!(
+                "NPU{npu_id} does not support MULTIPLICATION"
+            )),
+        }
+    }
+
+    pub fn matrix_vector_mul_batched(
+        self,
+        npu_id: u32,
+        matrix: &[bf16],
+        vector_batch: &[bf16],
+        vector_len: usize,
+    ) -> Result<Vec<bf16>, ToolkitError> {
+        match self {
+            NPUBackend::Gen2 => {
+                gen2::matrix_vector_mul_batched(npu_id, matrix, vector_batch, vector_len)
+            }
+            NPUBackend::Gen2p => Err(toolkit_error!(
+                "NPU{npu_id} does not support MULTIPLICATION"
+            )),
+        }
+    }
+
+    pub fn scaled_periodic_nl(
+        self,
+        npu_id: u32,
+        us: &[bf16],
+        vs: &[bf16],
+    ) -> Result<Vec<bf16>, ToolkitError> {
+        match self {
+            NPUBackend::Gen2 => gen2::scaled_periodic_nl(npu_id, us, vs),
+            NPUBackend::Gen2p => Err(toolkit_error!("NPU{npu_id} does not support NONLINEARITY")),
+        }
+    }
+
+    pub fn dft_batched(
+        self,
+        npu_id: u32,
+        data: &[bf16],
+        dft_size: usize,
+    ) -> Result<Vec<bf16>, ToolkitError> {
+        match self {
+            NPUBackend::Gen2p => gen2p::dft_batched(npu_id, data, dft_size),
+            NPUBackend::Gen2 => Err(toolkit_error!("NPU{npu_id} does not support DFT")),
+        }
+    }
+
+    pub fn reset_perf_counter(self, npu_id: u32) -> Result<(), ToolkitError> {
+        match self {
+            NPUBackend::Gen2 => gen2::reset_perf_counter(npu_id),
+            NPUBackend::Gen2p => gen2p::reset_perf_counter(npu_id),
+        }
+    }
+
+    pub fn get_perf_counter(
+        self,
+        npu_id: u32,
+    ) -> Result<dto::PerformanceCounterInfo, ToolkitError> {
+        match self {
+            NPUBackend::Gen2 => gen2::get_perf_counter(npu_id),
+            NPUBackend::Gen2p => gen2p::get_perf_counter(npu_id),
+        }
+    }
+
+    pub fn get_version(self, npu_id: u32) -> Result<String, ToolkitError> {
+        match self {
+            NPUBackend::Gen2 => gen2::get_version(npu_id),
+            NPUBackend::Gen2p => gen2p::get_version(npu_id),
+        }
+    }
+
+    pub fn get_version_ptr_based(
+        self,
+        npu_id: u32,
+        output: *mut c_char,
+        len: usize,
+    ) -> Result<(), ToolkitError> {
+        match self {
+            NPUBackend::Gen2 => gen2::get_version_ptr_based(npu_id, output, len),
+            NPUBackend::Gen2p => gen2p::get_version_ptr_based(npu_id, output, len),
+        }
+    }
+
+    pub fn get_device_info(self, npu_id: u32) -> Result<dto::DeviceInfo, ToolkitError> {
+        match self {
+            NPUBackend::Gen2 => gen2::get_device_info(npu_id),
+            NPUBackend::Gen2p => gen2p::get_device_info(npu_id),
+        }
+    }
+
+    pub fn get_sensor_info(self, npu_id: u32) -> Result<dto::SensorInfo, ToolkitError> {
+        match self {
+            NPUBackend::Gen2 => gen2::get_sensor_info(npu_id),
+            NPUBackend::Gen2p => gen2p::get_sensor_info(npu_id),
+        }
+    }
+
+    pub fn get_version_info(self, npu_id: u32) -> Result<dto::QantVersionInfo, ToolkitError> {
+        match self {
+            NPUBackend::Gen2 => gen2::get_version_info(npu_id),
+            NPUBackend::Gen2p => gen2p::get_version_info(npu_id),
+        }
+    }
+    pub fn allocate(
+        self,
+        npu_id: u32,
+        rows: usize,
+        cols: usize,
+        data_role: QantDataRole,
+    ) -> Result<QantDriverHandle, ToolkitError> {
+        match self {
+            NPUBackend::Gen2 => {
+                let mut out_handle = QantDriverHandle { npu_id, key: 0 };
+                utils::driver_err_to_result(gen2::qant_driver_allocate(
+                    npu_id,
+                    rows,
+                    cols,
+                    data_role,
+                    &mut out_handle,
+                ))?;
+                Ok(out_handle)
+            }
+            NPUBackend::Gen2p => Err(toolkit_error!("NPU{npu_id} does not support MEM_HANDLING")),
+        }
+    }
+
+    pub fn free(self, handle: QantDriverHandle) -> Result<(), ToolkitError> {
+        let npu_id = handle.npu_id;
+        match self {
+            NPUBackend::Gen2 => {
+                let driver_err = gen2::qant_driver_free(handle);
+                utils::driver_err_to_result(driver_err)
+            }
+            NPUBackend::Gen2p => Err(toolkit_error!("NPU{npu_id} does not support MEM_HANDLING")),
+        }
+    }
+
+    pub fn upload(self, handle: QantDriverHandle, data: &[bf16]) -> Result<(), ToolkitError> {
+        let npu_id = handle.npu_id;
+        match self {
+            NPUBackend::Gen2 => {
+                let driver_err = gen2::qant_driver_upload(handle, data.as_ptr());
+                utils::driver_err_to_result(driver_err)
+            }
+            NPUBackend::Gen2p => Err(toolkit_error!("NPU{npu_id} does not support MEM_HANDLING")),
+        }
+    }
+
+    pub fn download(self, handle: QantDriverHandle, len: usize) -> Result<Vec<bf16>, ToolkitError> {
+        let npu_id = handle.npu_id;
+        match self {
+            NPUBackend::Gen2 => {
+                let mut data = Vec::<bf16>::with_capacity(len);
+                let driver_err = gen2::qant_driver_download(handle, data.as_mut_ptr());
+                unsafe {
+                    data.set_len(len);
+                }
+                utils::driver_err_to_result(driver_err)?;
+                Ok(data)
+            }
+            NPUBackend::Gen2p => Err(toolkit_error!("NPU{npu_id} does not support MEM_HANDLING")),
+        }
+    }
+
+    pub fn mul_matrix_vec_batched_mem(
+        self,
+        matrix_handle: QantDriverHandle,
+        vector_handle: QantDriverHandle,
+        output_handle: QantDriverHandle,
+    ) -> Result<(), ToolkitError> {
+        let npu_id = matrix_handle.npu_id;
+        match self {
+            NPUBackend::Gen2 => {
+                let driver_err = gen2::qant_driver_mul_matrix_vec_batched_mem(
+                    matrix_handle,
+                    vector_handle,
+                    output_handle,
+                );
+                utils::driver_err_to_result(driver_err)
+            }
+            NPUBackend::Gen2p => Err(toolkit_error!("NPU{npu_id} does not support MEM_HANDLING")),
+        }
+    }
 }
 
 pub fn setup_logging(folder_name: &str, loglevel: tracing::Level) -> Result<(), ToolkitError> {
-    let folder_cstr = match CString::new(folder_name) {
-        Ok(cstr) => cstr,
-        Err(_) => {
-            return Err(ToolkitError::from_str(
-                "cannot convert folder_name to CString",
-            ));
-        }
-    };
-    let loglevel_int = utils::log_level_to_int(loglevel);
-
-    let driver_err =
-        unsafe { backend::qant_driver_setup_logging(folder_cstr.as_ptr(), loglevel_int) };
-    err_to_result(driver_err)
+    gen2::setup_logging(folder_name, loglevel)?;
+    gen2p::setup_logging(folder_name, loglevel)?;
+    Ok(())
 }
 
-/// Takes a c function and returns a rust function.
-pub fn wrap_c_function_of_two_arrays(
-    c_fn: unsafe extern "C" fn(
-        id: u32,
-        *const bf16,
-        *const bf16,
-        *mut bf16,
-        usize,
-    ) -> QantDriverError,
-) -> impl Fn(u32, &[bf16], &[bf16]) -> Result<Vec<bf16>, ToolkitError> {
-    move |id: u32, us: &[bf16], vs: &[bf16]| -> Result<Vec<bf16>, ToolkitError> {
-        if us.len() != vs.len() {
-            return Err(toolkit_error!(
-                "input vectors must have same length, got {0} and {1}",
-                us.len(),
-                vs.len()
-            ));
-        }
-
-        let len = us.len();
-        let mut res = Vec::<bf16>::with_capacity(len);
-
-        let driver_err = unsafe { c_fn(id, us.as_ptr(), vs.as_ptr(), res.as_mut_ptr(), len) };
-        err_to_result(driver_err)?;
-
-        unsafe {
-            res.set_len(len);
-        }
-        Ok(res)
-    }
+/// `npu_id`: [`AUTO_NPU_ID`] (-1) selects the first NPU (any backend);
+/// a non-negative id targets that NPU directly. Errors if `npu_id < -1`.
+pub fn init_npu(npu_id: i32) -> Result<(), ToolkitError> {
+    let npu = device_manager::resolve_any(npu_id)?;
+    npu.backend.init_npu(npu.id)
 }
 
-pub fn init_npu(npu_id: u32) -> Result<(), ToolkitError> {
-    let driver_err = unsafe { backend::qant_driver_init_npu(npu_id) };
-    err_to_result(driver_err)
+/// See [`init_npu`] for `npu_id` semantics.
+pub fn release_npu(npu_id: i32) -> Result<(), ToolkitError> {
+    let npu = device_manager::resolve_any(npu_id)?;
+    npu.backend.release_npu(npu.id)
 }
 
-pub fn release_npu(npu_id: u32) -> Result<(), ToolkitError> {
-    let driver_err = unsafe { backend::qant_driver_release_npu(npu_id) };
-    err_to_result(driver_err)
+/// `npu_id`: [`AUTO_NPU_ID`] (-1) selects the first NPU that supports
+/// multiplication; a non-negative id targets that NPU directly. Errors if
+/// `npu_id < -1`.
+pub fn mul(npu_id: i32, us: &[bf16], vs: &[bf16]) -> Result<Vec<bf16>, ToolkitError> {
+    let npu =
+        device_manager::resolve_npu(npu_id, |npu| npu.supports(&[QantDeviceCapability::Mul]))?;
+    npu.backend.mul(npu.id, us, vs)
 }
 
-pub fn init_npu_error_code(npu_id: u32) -> c_int {
-    unsafe { backend::qant_driver_init_npu(npu_id).code }
-}
-
-pub fn release_npu_error_code(npu_id: u32) -> c_int {
-    unsafe { backend::qant_driver_release_npu(npu_id).code }
-}
-
-pub fn mul(npu_id: u32, us: &[bf16], vs: &[bf16]) -> Result<Vec<bf16>, ToolkitError> {
-    let res = wrap_c_function_of_two_arrays(backend::qant_driver_mul_npu)(npu_id, us, vs)?;
-    Ok(res)
-}
-
+/// See [`mul`] for `npu_id` semantics.
 pub fn matrix_vector_mul_batched(
-    npu_id: u32,
+    npu_id: i32,
     matrix: &[bf16],
     vector_batch: &[bf16],
     vector_len: usize,
 ) -> Result<Vec<bf16>, ToolkitError> {
-    if !matrix.len().is_multiple_of(vector_len) || !vector_batch.len().is_multiple_of(vector_len) {
-        return Err(toolkit_error!(
-            "flattened matrix and vectors are not shape compatible, got matrix.len()={0}, vector_len={vector_len} and vector_batch.len()={1}",
-            matrix.len(),
-            vector_batch.len()
-        ));
-    }
-    let n_cols = vector_len;
-    let n_rows = matrix.len() / n_cols;
-    let n_vecs = vector_batch.len() / vector_len;
-    let mut res = Vec::<bf16>::with_capacity(n_rows * n_vecs);
-
-    let driver_err = unsafe {
-        backend::qant_driver_mul_matrix_vec_batched(
-            npu_id,
-            matrix.as_ptr(),
-            vector_batch.as_ptr(),
-            res.as_mut_ptr(),
-            n_rows,
-            n_cols,
-            n_vecs,
-        )
-    };
-    unsafe {
-        res.set_len(n_rows * n_vecs);
-    }
-
-    err_to_result(driver_err)?;
-    Ok(res)
+    let npu =
+        device_manager::resolve_npu(npu_id, |npu| npu.supports(&[QantDeviceCapability::Mul]))?;
+    npu.backend
+        .matrix_vector_mul_batched(npu.id, matrix, vector_batch, vector_len)
 }
 
+/// `npu_id`: [`AUTO_NPU_ID`] (-1) selects the first NPU that supports
+/// the nonlinearity operation; a non-negative id targets that NPU directly.
+/// Errors if `npu_id < -1`.
 pub fn scaled_periodic_nl(
-    npu_id: u32,
+    npu_id: i32,
     us: &[bf16],
     vs: &[bf16],
 ) -> Result<Vec<bf16>, ToolkitError> {
-    let res =
-        wrap_c_function_of_two_arrays(backend::qant_driver_scaled_periodic_nl_npu)(npu_id, us, vs)?;
-    Ok(res)
+    let npu =
+        device_manager::resolve_npu(npu_id, |npu| npu.supports(&[QantDeviceCapability::NonLin]))?;
+    npu.backend.scaled_periodic_nl(npu.id, us, vs)
 }
 
+/// `npu_id`: [`AUTO_NPU_ID`] (-1) selects the first NPU that supports
+/// memory handling; a non-negative id targets that NPU directly.
 pub fn allocate(
-    npu_id: u32,
+    npu_id: i32,
     rows: usize,
     cols: usize,
     data_role: QantDataRole,
 ) -> Result<QantDriverHandle, ToolkitError> {
-    let mut out_handle = QantDriverHandle { npu_id, key: 0 };
-    let driver_err =
-        unsafe { backend::qant_driver_allocate(npu_id, rows, cols, data_role, &mut out_handle) };
-    err_to_result(driver_err)?;
-    Ok(out_handle)
+    let npu = device_manager::resolve_npu(npu_id, |npu| {
+        npu.supports(&[QantDeviceCapability::MemHandling])
+    })?;
+    npu.backend.allocate(npu.id, rows, cols, data_role)
 }
 
 pub fn free(handle: QantDriverHandle) -> Result<(), ToolkitError> {
-    let driver_err = unsafe { backend::qant_driver_free(handle) };
-    err_to_result(driver_err)
+    let npu = device_manager::npu_by_id(handle.npu_id)?;
+    npu.backend.free(handle)
 }
 
 pub fn upload(handle: QantDriverHandle, data: &[bf16]) -> Result<(), ToolkitError> {
-    let driver_err = unsafe { backend::qant_driver_upload(handle, data.as_ptr()) };
-    err_to_result(driver_err)
+    let npu = device_manager::npu_by_id(handle.npu_id)?;
+    npu.backend.upload(handle, data)
 }
 
 pub fn download(handle: QantDriverHandle, len: usize) -> Result<Vec<bf16>, ToolkitError> {
-    let mut data = Vec::<bf16>::with_capacity(len);
-    let driver_err = unsafe { backend::qant_driver_download(handle, data.as_mut_ptr()) };
-    unsafe {
-        data.set_len(len);
-    }
-    err_to_result(driver_err)?;
-    Ok(data)
+    let npu = device_manager::npu_by_id(handle.npu_id)?;
+    npu.backend.download(handle, len)
 }
 
 pub fn mul_matrix_vec_batched_mem(
@@ -274,100 +324,119 @@ pub fn mul_matrix_vec_batched_mem(
     vector_handle: QantDriverHandle,
     output_handle: QantDriverHandle,
 ) -> Result<(), ToolkitError> {
-    let driver_err = unsafe {
-        backend::qant_driver_mul_matrix_vec_batched_mem(matrix_handle, vector_handle, output_handle)
-    };
-    err_to_result(driver_err)
+    let npu = device_manager::npu_by_id(matrix_handle.npu_id)?;
+    npu.backend
+        .mul_matrix_vec_batched_mem(matrix_handle, vector_handle, output_handle)
 }
 
-pub fn get_version(npu_id: u32) -> Result<String, ToolkitError> {
-    let max_len = 512;
-    let mut res = String::with_capacity(max_len);
-    let driver_err = unsafe {
-        backend::qant_driver_get_version(npu_id, res.as_mut_ptr() as *mut c_char, max_len)
-    };
-    err_to_result(driver_err)?;
-    let c_str = unsafe { std::ffi::CStr::from_ptr(res.as_ptr() as *const c_char) };
-    let rust_str = c_str.to_string_lossy();
-
-    Ok(rust_str.into())
+/// `npu_id`: [`AUTO_NPU_ID`] (-1) selects the first NPU that supports
+/// DFT; a non-negative id targets that NPU directly. Errors if `npu_id < -1`.
+pub fn dft_batched(npu_id: i32, data: &[bf16], dft_size: usize) -> Result<Vec<bf16>, ToolkitError> {
+    let npu =
+        device_manager::resolve_npu(npu_id, |npu| npu.supports(&[QantDeviceCapability::Dft]))?;
+    npu.backend.dft_batched(npu.id, data, dft_size)
 }
 
-/// to pipe the function directly to the C/C++ interface
-pub fn get_version_ptr_based(npu_id: u32, output: *mut c_char, len: usize) -> QantDriverError {
-    unsafe { backend::qant_driver_get_version(npu_id, output, len) }
+/// `npu_id`: [`AUTO_NPU_ID`] (-1) selects the first NPU; a non-negative
+/// id targets that NPU directly. Errors if `npu_id < -1`.
+pub fn get_version(npu_id: i32) -> Result<String, ToolkitError> {
+    let npu = device_manager::resolve_any(npu_id)?;
+    npu.backend.get_version(npu.id)
 }
 
-pub fn get_device_info(npu_id: u32) -> Result<DeviceInfo, ToolkitError> {
-    let device_info = unsafe { backend::qant_driver_get_device_info(npu_id) };
-    err_to_result(device_info.error)?;
-    Ok(DeviceInfo {
-        sensor: device_info.sensor_info,
-        version_info: VersionInfo::from_c_struct(device_info.version_info),
-    })
+/// See [`get_version`] for `npu_id` semantics.
+pub fn get_version_ptr_based(
+    npu_id: i32,
+    output: *mut c_char,
+    len: usize,
+) -> Result<(), ToolkitError> {
+    let npu = device_manager::resolve_any(npu_id)?;
+    npu.backend.get_version_ptr_based(npu.id, output, len)
 }
 
-/// Returns the sensor info
-/// just used for the direct C/C++ interface, all other functions should
-/// use the get_device_info function
-pub fn get_sensor_info(npu_id: u32) -> SensorInfo {
-    let device_info = unsafe { backend::qant_driver_get_device_info(npu_id) };
-    device_info.sensor_info
+/// See [`get_version`] for `npu_id` semantics.
+pub fn get_device_info(npu_id: i32) -> Result<dto::DeviceInfo, ToolkitError> {
+    let npu = device_manager::resolve_any(npu_id)?;
+    npu.backend.get_device_info(npu.id)
 }
 
-/// Returns the version info
-/// just used for the direct C/C++ interface, all other functions should
-/// use the get_device_info function
-pub fn get_version_info(npu_id: u32) -> QantVersionInfo {
-    let device_info = unsafe { backend::qant_driver_get_device_info(npu_id) };
-    device_info.version_info
+/// Sensor info as C struct, for the C/C++ interface.
+/// See [`get_version`] for `npu_id` semantics.
+pub fn get_sensor_info(npu_id: i32) -> Result<dto::SensorInfo, ToolkitError> {
+    let npu = device_manager::resolve_any(npu_id)?;
+    npu.backend.get_sensor_info(npu.id)
 }
 
-pub fn get_available_npus() -> Result<HashMap<u32, String>, ToolkitError> {
-    const MAX_N_NPUS: usize = 10;
-    let mut idx_arr = [0_u32; MAX_N_NPUS];
-    let mut serial_arr = [[0; C_STRING_DEFAULT_LENGTH]; MAX_N_NPUS];
-    let mut n_npus: usize = 0;
-    let driver_err = unsafe {
-        backend::qant_driver_get_available_npus(
-            idx_arr.as_mut_ptr(),
-            serial_arr.as_mut_ptr(),
-            MAX_N_NPUS,
-            &mut n_npus as *mut usize,
-        )
-    };
-    err_to_result(driver_err)?;
-    let mut ret = HashMap::new();
-    for i in 0..n_npus {
-        ret.insert(idx_arr[i], c_char_to_rust_str(&serial_arr[i]));
+/// Version info as C struct, for the C/C++ interface.
+/// See [`get_version`] for `npu_id` semantics.
+pub fn get_version_info(npu_id: i32) -> Result<dto::QantVersionInfo, ToolkitError> {
+    let npu = device_manager::resolve_any(npu_id)?;
+    npu.backend.get_version_info(npu.id)
+}
+
+/// See [`get_version`] for `npu_id` semantics.
+pub fn reset_perf_counter(npu_id: i32) -> Result<(), ToolkitError> {
+    let npu = device_manager::resolve_any(npu_id)?;
+    npu.backend.reset_perf_counter(npu.id)
+}
+
+/// See [`get_version`] for `npu_id` semantics.
+pub fn get_perf_counter(npu_id: i32) -> Result<dto::PerformanceCounterInfo, ToolkitError> {
+    let npu = device_manager::resolve_any(npu_id)?;
+    npu.backend.get_perf_counter(npu.id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::device_manager::DEVICES;
+    use super::*;
+
+    #[test]
+    fn npu_id_below_default_errors_across_the_public_api() {
+        assert!(init_npu(-2).is_err());
+        assert!(release_npu(-2).is_err());
+        assert!(mul(-2, &[], &[]).is_err());
+        assert!(matrix_vector_mul_batched(-2, &[], &[], 0).is_err());
+        assert!(scaled_periodic_nl(-2, &[], &[]).is_err());
+        assert!(dft_batched(-2, &[], 0).is_err());
+        assert!(get_version(-2).is_err());
+        assert!(get_device_info(-2).is_err());
+        assert!(get_sensor_info(-2).is_err());
+        assert!(get_version_info(-2).is_err());
+        assert!(reset_perf_counter(-2).is_err());
+        assert!(get_perf_counter(-2).is_err());
+        assert!(get_capabilities(-2).is_err());
     }
-    Ok(ret)
-}
 
-/// to pipe the function directly to the C/C++ interface
-pub fn get_available_npus_ptr_based(
-    idxs_out: *mut u32,
-    serials_out: *mut [c_char; C_STRING_DEFAULT_LENGTH],
-    capacity: usize,
-    out_count: *mut usize,
-) -> QantDriverError {
-    unsafe { backend::qant_driver_get_available_npus(idxs_out, serials_out, capacity, out_count) }
-}
+    #[test]
+    fn auto_npu_id_resolves_like_the_first_capable_npu() {
+        // Whatever NPUs are enumerated in this environment (cpu-backend
+        // simulation or real hardware), -1 must behave the same as
+        // explicitly targeting the first NPU whose backend supports the
+        // requested operation.
+        let first_generic = DEVICES.first();
+        let first_mul = DEVICES
+            .iter()
+            .find(|npu| npu.supports(&[QantDeviceCapability::Mul]));
+        let first_dft = DEVICES
+            .iter()
+            .find(|npu| npu.supports(&[QantDeviceCapability::Dft]));
 
-pub fn reset_perf_counter(npu_id: u32) -> Result<(), ToolkitError> {
-    let driver_err = unsafe { backend::qant_driver_reset_perf_counter(npu_id) };
-    err_to_result(driver_err)?;
-    Ok(())
-}
+        if first_generic.is_some() {
+            init_npu(AUTO_NPU_ID).unwrap();
+            release_npu(AUTO_NPU_ID).unwrap();
+        }
 
-pub fn get_perf_counter(npu_id: u32) -> Result<PerformanceCounterInfo, ToolkitError> {
-    let mut counter: PerformanceCounterInfo = PerformanceCounterInfo {
-        timebased_counter: 0.0,
-        stalling_counter: 0.0,
-    };
-    let err = unsafe {
-        backend::qant_driver_get_perf_counter(npu_id, &mut counter as *mut PerformanceCounterInfo)
-    };
-    err_to_result(err)?;
-    Ok(counter)
+        match first_mul {
+            Some(_) => assert!(mul(AUTO_NPU_ID, &[], &[]).is_ok()),
+            None => assert!(mul(AUTO_NPU_ID, &[], &[]).is_err()),
+        }
+
+        match first_dft {
+            Some(_) => {
+                assert!(dft_batched(AUTO_NPU_ID, &[bf16::from_f32(0.0); 4], 2).is_ok())
+            }
+            None => assert!(dft_batched(AUTO_NPU_ID, &[], 0).is_err()),
+        }
+    }
 }

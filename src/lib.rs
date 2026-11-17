@@ -2,6 +2,7 @@ pub mod bias;
 mod c_bridge;
 pub mod conv;
 pub mod data_structures;
+pub mod dft;
 pub mod elementwise;
 pub mod errors;
 mod global_settings;
@@ -15,7 +16,9 @@ mod python_bridge;
 mod qant_driver_import;
 pub(crate) mod utils;
 
+pub use qant_driver_import::QantDeviceCapability;
 pub use qant_driver_import::get_available_npus;
+pub use qant_driver_import::get_capabilities;
 pub use qant_driver_import::get_device_info;
 pub use qant_driver_import::get_perf_counter;
 pub use qant_driver_import::get_version as get_driver_info;
@@ -50,9 +53,9 @@ mod tests {
 
     #[test]
     fn available_npus() {
-        let available_npus = qant_driver_import::get_available_npus().unwrap();
+        let available_npus = qant_driver_import::get_available_npus(&[]).unwrap();
         println!("{available_npus:?}");
-        assert!(available_npus.keys().len() > 0)
+        assert!(!available_npus.is_empty())
     }
 
     #[test]

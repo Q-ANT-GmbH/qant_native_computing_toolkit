@@ -12,17 +12,32 @@ on:
         type: string
         required: false
         default: '["cpu-backend", "default"]'
-      driver_source:
+      driver_gen2_source:
         description: "Where install_driver fetches the driver from: 'release' or 'artifact'."
         type: string
         required: true
-      driver_version:
-        description: "Driver release tag, used when driver_source=release."
+      driver_gen2_version:
+        description: "Driver release tag, used when driver_gen2_source=release."
         type: string
         required: false
         default: ''
-      driver_run_id:
-        description: "Driver workflow run id, used when driver_source=artifact."
+      driver_gen2_run_id:
+        description: "Driver workflow run id, used when driver_gen2_source=artifact."
+        type: string
+        required: false
+        default: ''
+      driver_gen2plus_source:
+        description: "Where install_driver fetches the gen2plus driver from: 'release' or 'artifact'."
+        type: string
+        required: false
+        default: ''
+      driver_gen2plus_version:
+        description: "Gen2plus driver release tag, used when driver_gen2plus_source=release."
+        type: string
+        required: false
+        default: ''
+      driver_gen2plus_run_id:
+        description: "Gen2plus driver workflow run id, used when driver_gen2plus_source=artifact."
         type: string
         required: false
         default: ''
@@ -88,10 +103,26 @@ jobs:
       if: ${{ matrix.features != 'cpu-backend' }}
       with:
         os: ${{ matrix.os }}
-        source: ${{ inputs.driver_source }}
-        version: ${{ inputs.driver_version }}
-        run-id: ${{ inputs.driver_run_id }}
+        source: ${{ inputs.driver_gen2_source }}
+        version: ${{ inputs.driver_gen2_version }}
+        run-id: ${{ inputs.driver_gen2_run_id }}
         token: ${{ secrets.PAT_DRIVER_REPO_READ }}
+    # Proves the install_driver action can fetch and
+    # apt-install the qant_native_computing_driver_gen2plus package. Not wired into cargo
+    # build/test yet - the driver's C API is still incomplete, so the toolkit has no way to link
+    # against it - so this only installs it alongside the real driver, it isn't built against.
+    - uses: ./.github/actions/install_driver
+      if: ${{ matrix.features != 'cpu-backend' }}
+      with:
+        os: ${{ matrix.os }}
+        source: ${{ inputs.driver_gen2plus_source }}
+        version: ${{ inputs.driver_gen2plus_version }}
+        run-id: ${{ inputs.driver_gen2plus_run_id }}
+        token: ${{ secrets.PAT_DRIVER_REPO_READ }}
+        repo: Q-ANT-GmbH/qant_native_computing_driver_gen2plus
+        output-dir: driver_pkg_gen2plus
+        artifact-name: qant-native-computing-driver-gen2plus-packages-simulated
+        generation: gen2plus
     - name: Build rust lib and python package
       shell: bash
       run: |
@@ -196,10 +227,26 @@ jobs:
         if: ${{ matrix.features != 'cpu-backend' }}
         with:
           os: ${{ matrix.os }}
-          source: ${{ inputs.driver_source }}
-          version: ${{ inputs.driver_version }}
-          run-id: ${{ inputs.driver_run_id }}
+          source: ${{ inputs.driver_gen2_source }}
+          version: ${{ inputs.driver_gen2_version }}
+          run-id: ${{ inputs.driver_gen2_run_id }}
           token: ${{ secrets.PAT_DRIVER_REPO_READ }}
+      # Proves the install_driver action can fetch and
+      # apt-install the qant_native_computing_driver_gen2plus package. Not wired into cargo
+      # build/test yet - the driver's C API is still incomplete, so the toolkit has no way to link
+      # against it - so this only installs it alongside the real driver, it isn't built against.
+      - uses: ./.github/actions/install_driver
+        if: ${{ matrix.features != 'cpu-backend' }}
+        with:
+          os: ${{ matrix.os }}
+          source: ${{ inputs.driver_gen2plus_source }}
+          version: ${{ inputs.driver_gen2plus_version }}
+          run-id: ${{ inputs.driver_gen2plus_run_id }}
+          token: ${{ secrets.PAT_DRIVER_REPO_READ }}
+          repo: Q-ANT-GmbH/qant_native_computing_driver_gen2plus
+          output-dir: driver_pkg_gen2plus
+          artifact-name: qant-native-computing-driver-gen2plus-packages-simulated
+          generation: gen2plus
       - name: Download the toolkit whl
         uses: actions/download-artifact@v8
         with:

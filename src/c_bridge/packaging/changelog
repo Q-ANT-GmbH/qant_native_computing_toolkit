@@ -1,4 +1,29 @@
-qant-native-computing-toolkit (2.4.1-0) stable; urgency=low
+qant-native-computing-toolkit (2.5.0-0) stable; urgency=low
+
+  * DFT support: new dft() for batched complex-to-complex DFTs on
+    bcomplex32 (kDLBcomplex) tensors.
+  * DLPack updated to v1.4.
+  * npu_id is now a signed 32-bit integer everywhere;
+    QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID (-1) selects the first NPU that
+    supports the requested operation. Values below -1 are rejected with an
+    error.
+  * get_sensor_info() and get_version_info() now return an error
+    code and write their result into an out-parameter, instead of returning
+    a zeroed struct on failure.
+  * init_npu(), release_npu(), get_driver_info(), reset_perf_counter() and
+    get_perf_counter() now follow the common error convention: 0 on
+    success, -1 on failure with the error message printed to stderr.
+  * New get_capabilities() reports which operations an NPU supports, as a
+    list of QantDeviceCapability (Mul, NonLin, Dft, MemHandling).
+  * get_available_npus() takes a list of QantDeviceCapability (Mul, NonLin,
+    Dft, MemHandling) and lists only the NPUs that support all of them,
+    sorted by id. An empty list returns all NPUs.
+  * get_available_npus() and QANT_NATIVE_COMPUTING_TOOLKIT_DEFAULT_CHAR_ARR_LENGTH
+    moved to qant_native_computing_toolkit_generic.h.
+
+ -- Q.ANT GmbH <info@qant.de>  Fri, 13 Nov 2026 12:00:00 +0000
+
+ qant-native-computing-toolkit (2.4.1-0) stable; urgency=low
 
   * Bugfixes for batched inputs in conv_transpose, batchnorm, pooling and softmax.
 

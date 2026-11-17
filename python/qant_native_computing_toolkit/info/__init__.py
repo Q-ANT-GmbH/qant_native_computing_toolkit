@@ -1,3 +1,4 @@
+from .._wrapper import get_capabilities as get_capabilities
 from .._wrapper import get_driver_info as get_driver_info
 from .._wrapper import get_perf_counter as get_perf_counter
 from .._wrapper import get_sensor_info as get_sensor_info

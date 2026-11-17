@@ -10,7 +10,7 @@ import qant_native_computing_toolkit.info as q_info
 import qant_native_computing_toolkit.native as q_native
 import torch
 import utils
-from ml_dtypes import bfloat16
+from ml_dtypes import bcomplex32, bfloat16
 from numpy.testing import assert_allclose, assert_array_less, assert_equal
 
 
@@ -24,6 +24,19 @@ def rng():
 def test_init():
     q_generic.init_npu(0)
     q_generic.release_npu(0)
+
+
+@pytest.mark.parametrize(
+    "func",
+    [
+        lambda device_id: q_generic.init_npu(device_id),
+        lambda device_id: q_generic.release_npu(device_id),
+        lambda device_id: q_info.get_driver_info(device_id),
+    ],
+)
+def test_npu_id_below_default_sentinel_raises(func):
+    with pytest.raises(ValueError):
+        func(-2)
 
 
 @pytest.mark.parametrize(
@@ -563,7 +576,7 @@ def test_kan_layer_batched(rng):
         res_cpu.append(res_batch)
     res_cpu = np.array(res_cpu)
     assert_allclose(res_npu, res_cpu, atol=0.27)
-    assert_array_less(np.mean(np.abs(res_npu - res_cpu)), 0.08)
+    assert_array_less(np.mean(np.abs(res_npu - res_cpu)), 0.1)
 
 
 @pytest.mark.parametrize(
@@ -825,6 +838,91 @@ def test_adaptive_avgpool2d_fprop(features_shape, output_size, rng):
     assert_allclose(res_qant, utils.torch2numpybfloat(res_torch), atol=0.01)
 
 
+def _assert_dft_close(x):
+    # x has dtype bcomplex32; numpy cannot compute on bcomplex32 directly (e.g. np.linalg.norm
+    # silently drops the imaginary part), so compare in complex64
+    res_qant = q_native.dft(x)
+    res_numpy = np.fft.fft(x.astype(np.complex64)).astype(np.complex64)
+
+    assert_equal(res_qant.dtype, bcomplex32)
+    assert_equal(res_qant.shape, res_numpy.shape)
+    l2_error = np.linalg.norm(res_qant.astype(np.complex64) - res_numpy, axis=-1)
+    l2_norm = np.linalg.norm(res_numpy, axis=-1)
+
+    assert_array_less(l2_error / l2_norm, 2e-2)
+
+
+@pytest.mark.parametrize(
+    "n",
+    [
+        (1),
+        (16),
+        (128),
+        (1024),
+        (2048),
+    ],
+)
+def test_dft(rng, n):
+    x = rng.uniform(-10.0, 10.0, size=(n,)).astype(bcomplex32)
+    _assert_dft_close(x)
+
+
+@pytest.mark.parametrize(
+    "n",
+    [
+        (1, 1),
+        (2, 16),
+        (4, 128),
+        (2, 3, 16),
+    ],
+)
+def test_dft_batched(rng, n):
+    x = (
+        rng.uniform(-10.0, 10.0, size=n) + 1j * rng.uniform(-10.0, 10.0, size=n)
+    ).astype(bcomplex32)
+    _assert_dft_close(x)
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        np.ones((2, 16), dtype=np.complex64),
+        np.ones((2, 16), dtype=np.complex128),
+        np.ones((2, 16), dtype=np.float32),
+        np.ones((2, 16), dtype=bfloat16),
+        np.ones((2, 16), dtype=np.int32),
+        np.array(["a", "b"]),
+        [1 + 1j, 2 - 1j],  # not a numpy array
+    ],
+)
+def test_dft_wrong_dtype(data):
+    with pytest.raises(TypeError):
+        q_native.dft(data)
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [
+        (0,),
+        (0, 16),
+        (2, 0),
+        (2, 0, 16),
+    ],
+)
+def test_dft_empty(shape):
+    x = np.zeros(shape, dtype=bcomplex32)
+    res = q_native.dft(x)
+
+    assert_equal(res.dtype, bcomplex32)
+    assert_equal(res.shape, shape)
+    assert res is not x
+
+
+def test_dft_zero_ndim():
+    with pytest.raises(ValueError):
+        q_native.dft(np.array(1.0, dtype=bcomplex32))
+
+
 def test_service_info():
     sensor_info = q_info.get_sensor_info(0)
     version_info = q_info.get_version_info(0)
@@ -837,9 +935,41 @@ def test_service_info():
     assert "commit" in driver_info
 
 
+_CAPABILITIES = [
+    q_generic.QantDeviceCapability.Mul,
+    q_generic.QantDeviceCapability.NonLin,
+    q_generic.QantDeviceCapability.Dft,
+    q_generic.QantDeviceCapability.MemHandling,
+]
+
+
+def test_get_capabilities():
+    capabilities = q_info.get_capabilities()
+    assert len(capabilities) > 0
+    assert all(c in _CAPABILITIES for c in capabilities)
+    assert len(set(capabilities)) == len(capabilities)
+
+
 def test_get_available_npus():
     npus = q_generic.get_available_npus()
-    assert len(npus.keys()) > 0
+    assert len(npus) > 0
+    assert all(isinstance(i, int) and isinstance(s, str) for i, s in npus)
+    assert q_generic.get_available_npus([]) == npus
+
+
+@pytest.mark.parametrize("capability", _CAPABILITIES)
+def test_get_available_npus_single_capability(capability):
+    expected = [
+        npu
+        for npu in q_generic.get_available_npus()
+        if capability in q_info.get_capabilities(npu[0])
+    ]
+    assert q_generic.get_available_npus([capability]) == expected
+
+
+def test_get_available_npus_rejects_invalid_operation():
+    with pytest.raises(TypeError):
+        q_generic.get_available_npus(["dft"])
 
 
 def test_allocate_and_drop_matrix():

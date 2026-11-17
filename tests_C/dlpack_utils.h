@@ -2,6 +2,7 @@
 #define DLPACK_UTILS_H
 
 #include <dlpack/dlpack.h>
+#include <stdexcept>
 #include <stdfloat>
 #include <vector>
 #include <xtensor/xadapt.hpp>
@@ -15,14 +16,15 @@ void delete_dltensor(struct DLManagedTensorVersioned *self)
 }
 
 DLManagedTensorVersioned
-xarray_to_dltensor(xt::xarray<std::bfloat16_t> const &xarr)
+xarray_to_dltensor(xt::xarray<std::bfloat16_t> const &xarr, std::vector<int64_t> const &shape,
+                   DLDataType dtype)
 {
-    // creates a managed DL tensor as a view on the data owned by the xtensor
+    // creates a managed DL tensor as a view on the data owned by the xtensor,
+    // with the given shape and dtype
 
     DLTensor tensor = DLTensor();
 
-    int32_t ndim = xarr.dimension();
-    auto shape = xarr.shape();
+    int32_t ndim = shape.size();
     tensor.ndim = ndim;
     tensor.shape = new int64_t[ndim];
     for (int i = 0; i < ndim; ++i)
@@ -31,9 +33,7 @@ xarray_to_dltensor(xt::xarray<std::bfloat16_t> const &xarr)
     };
     tensor.strides = NULL;
 
-    tensor.dtype.code = kDLBfloat;
-    tensor.dtype.bits = 16;
-    tensor.dtype.lanes = 1;
+    tensor.dtype = dtype;
 
     tensor.data = const_cast<void *>(static_cast<const void *>(xarr.data()));
     tensor.byte_offset = 0;
@@ -47,6 +47,28 @@ xarray_to_dltensor(xt::xarray<std::bfloat16_t> const &xarr)
     dltensor.deleter = delete_dltensor;
 
     return dltensor;
+}
+
+DLManagedTensorVersioned
+xarray_to_dltensor(xt::xarray<std::bfloat16_t> const &xarr)
+{
+    // bfloat16 tensor with the same shape as the xtensor
+    std::vector<int64_t> shape(xarr.shape().begin(), xarr.shape().end());
+    return xarray_to_dltensor(xarr, shape, DLDataType{kDLBfloat, 16, 1});
+}
+
+DLManagedTensorVersioned
+xarray_to_bcomplex_dltensor(xt::xarray<std::bfloat16_t> const &xarr)
+{
+    // the xtensor of shape (..., 2) holds interleaved real and imaginary parts;
+    // the DL tensor views it as bcomplex32 (2x bfloat16) with shape (...)
+    auto const &xshape = xarr.shape();
+    if (xshape.empty() || xshape.back() != 2)
+    {
+        throw std::invalid_argument("last dimension must have size 2 (real, imaginary)");
+    }
+    std::vector<int64_t> shape(xshape.begin(), xshape.end() - 1);
+    return xarray_to_dltensor(xarr, shape, DLDataType{kDLBcomplex, 32, 1});
 }
 
 xt::xarray<std::bfloat16_t>

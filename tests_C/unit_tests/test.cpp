@@ -2,7 +2,10 @@
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <cmath>
+#include <complex>
 #include <iostream>
+#include <numbers>
 #include <random>
 #include <string>
 
@@ -22,6 +25,19 @@ namespace q_native = ::qant_native_computing_toolkit::native;
 namespace q_ai = ::qant_native_computing_toolkit::ai;
 namespace q_info = ::qant_native_computing_toolkit::info;
 
+// Returns the lowest id among the available NPUs that supports DFT.
+int32_t dft_npu_id()
+{
+    size_t const n_npus_max = 20;
+    uint32_t idxs[n_npus_max];
+    char serials[n_npus_max][QANT_NATIVE_COMPUTING_TOOLKIT_DEFAULT_CHAR_ARR_LENGTH];
+    size_t n_npus = 0;
+    q_generic::QantDeviceCapability const ops[] = {q_generic::Dft};
+    REQUIRE(q_generic::get_available_npus(ops, 1, idxs, serials, n_npus_max, &n_npus) == 0);
+    REQUIRE(n_npus > 0);
+    return static_cast<int32_t>(idxs[0]);
+}
+
 TEST_CASE("version check")
 {
     REQUIRE(QANT_NATIVE_COMPUTING_TOOLKIT_MAJOR_VERSION == 2);
@@ -34,9 +50,30 @@ TEST_CASE("init release")
     REQUIRE(q_generic::release_npu(0) == 0);
 }
 
+TEST_CASE("init release auto npu")
+{
+    REQUIRE(q_generic::init_npu(QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID) == 0);
+    REQUIRE(q_generic::release_npu(QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID) == 0);
+}
+
+TEST_CASE("npu_id below default sentinel is rejected")
+{
+    REQUIRE(q_generic::init_npu(-2) == -1);
+    REQUIRE(q_generic::release_npu(-2) == -1);
+}
+
 TEST_CASE("memory_allocate_and_free")
 {
     auto handle = q_generic::npu_allocate(0, 2, 3, q_generic::QantDataRole::Weights);
+    REQUIRE(handle != nullptr);
+
+    REQUIRE(q_generic::npu_free(handle) == 0);
+    REQUIRE(q_generic::release_npu(0) == 0);
+}
+
+TEST_CASE("memory_allocate auto npu")
+{
+    auto handle = q_generic::npu_allocate(QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID, 2, 3, q_generic::QantDataRole::Weights);
     REQUIRE(handle != nullptr);
 
     REQUIRE(q_generic::npu_free(handle) == 0);
@@ -460,6 +497,89 @@ TEST_CASE("kan_layer")
     qant_res_dltensor->deleter(qant_res_dltensor);
 }
 
+// Relative error ||res - ref|| / ||ref|| of res against a naive O(N^2) DFT
+// X[k] = sum_n x[n] * exp(-2*pi*i*k*n/N) of data.
+// data has shape (n_dfts, dft_size, 2), res holds n_dfts * dft_size interleaved
+// (real, imaginary) values.
+double dft_relative_error(Tensor const &data, std::bfloat16_t const *res)
+{
+    size_t const n_dfts = data.shape(0);
+    size_t const n = data.shape(1);
+    double err_sq = 0.0;
+    double ref_sq = 0.0;
+    for (size_t b = 0; b < n_dfts; ++b)
+    {
+        for (size_t k = 0; k < n; ++k)
+        {
+            std::complex<double> ref = 0.0;
+            for (size_t j = 0; j < n; ++j)
+            {
+                std::complex<double> const x(data(b, j, 0), data(b, j, 1));
+                ref += x * std::polar(1.0, -2.0 * std::numbers::pi * double(k * j % n) / double(n));
+            }
+            size_t const idx = 2 * (b * n + k);
+            std::complex<double> const npu(res[idx], res[idx + 1]);
+            err_sq += std::norm(npu - ref);
+            ref_sq += std::norm(ref);
+        }
+    }
+    return std::sqrt(err_sq / ref_sq);
+}
+
+void check_dft(int32_t const npu_id)
+{
+    // (n_dfts, dft_size, 2) with interleaved real and imaginary parts,
+    // passed as a (n_dfts, dft_size) bcomplex32 tensor
+    Tensor const data = xt::random::rand({2, 1024, 2}, -1.0, 1.0);
+
+    auto data_dltensor = xarray_to_bcomplex_dltensor(data);
+
+    auto qant_res_dltensor = q_native::dft(npu_id, &data_dltensor);
+    REQUIRE(qant_res_dltensor != nullptr);
+
+    DLTensor const &res = qant_res_dltensor->dl_tensor;
+    REQUIRE(res.ndim == 2);
+    REQUIRE(res.shape[0] == 2);
+    REQUIRE(res.shape[1] == 1024);
+    REQUIRE(res.dtype.code == kDLBcomplex);
+    REQUIRE(res.dtype.bits == 32);
+    REQUIRE(res.dtype.lanes == 1);
+
+    double const rel_err = dft_relative_error(data, static_cast<std::bfloat16_t const *>(res.data));
+    std::cout << "dft relative error: " << rel_err << std::endl;
+    REQUIRE(rel_err < 0.05);
+
+    data_dltensor.deleter(&data_dltensor);
+    qant_res_dltensor->deleter(qant_res_dltensor);
+}
+
+TEST_CASE("dft")
+{
+    auto const npu_id = dft_npu_id();
+    check_dft(npu_id);
+    REQUIRE(q_generic::release_npu(npu_id) == 0);
+}
+
+TEST_CASE("dft auto npu")
+{
+    // DFT is only supported by Gen2p NPUs, so the default sentinel must
+    // resolve to a Gen2p NPU rather than e.g. the first enumerated NPU.
+    check_dft(QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID);
+}
+
+TEST_CASE("dft rejects bfloat16 input")
+{
+    // the former (n_dfts, dft_size, 2) bfloat16 interface is no longer accepted
+    Tensor const data = xt::random::rand({2, 16, 2}, -1.0, 1.0);
+
+    auto data_dltensor = xarray_to_dltensor(data);
+
+    auto qant_res_dltensor = q_native::dft(QANT_NATIVE_COMPUTING_TOOLKIT_AUTO_NPU_ID, &data_dltensor);
+    REQUIRE(qant_res_dltensor == nullptr);
+
+    data_dltensor.deleter(&data_dltensor);
+}
+
 TEST_CASE("logging")
 {
     REQUIRE(q_info::setup_logging("/tmp/", 2) == 0);
@@ -482,7 +602,8 @@ TEST_CASE("driver_info")
 
 TEST_CASE("sensor_info")
 {
-    q_info::QantSensorInfo result = q_info::get_sensor_info(0);
+    q_info::QantSensorInfo result;
+    REQUIRE(q_info::get_sensor_info(0, &result) == 0);
     REQUIRE(q_generic::release_npu(0) == 0);
 
     std::cout << result.voltage_3v3 << std::endl;
@@ -492,7 +613,8 @@ TEST_CASE("sensor_info")
 
 TEST_CASE("version_info")
 {
-    q_info::QantVersionInfo result = q_info::get_version_info(0);
+    q_info::QantVersionInfo result;
+    REQUIRE(q_info::get_version_info(0, &result) == 0);
     REQUIRE(q_generic::release_npu(0) == 0);
 
     std::string zephyr_version(result.zephyr_version);
@@ -507,9 +629,52 @@ TEST_CASE("available_npus")
     char serials[n_npus_max][QANT_NATIVE_COMPUTING_TOOLKIT_DEFAULT_CHAR_ARR_LENGTH];
     size_t n_npus = 0;
 
-    int const err = q_info::get_available_npus(idxs, serials, n_npus_max, &n_npus);
+    int const err = q_generic::get_available_npus(nullptr, 0, idxs, serials, n_npus_max, &n_npus);
     REQUIRE(err == 0);
     REQUIRE(n_npus > 0);
+    for (size_t i = 1; i < n_npus; ++i)
+    {
+        REQUIRE(idxs[i - 1] < idxs[i]);
+    }
+
+    // every listed NPU supports all requested operations
+    q_generic::QantDeviceCapability const ops[] = {q_generic::Mul, q_generic::MemHandling};
+    uint32_t filtered_idxs[n_npus_max];
+    size_t n_filtered = 0;
+    REQUIRE(q_generic::get_available_npus(ops, 2, filtered_idxs, serials, n_npus_max, &n_filtered) == 0);
+    REQUIRE(n_filtered <= n_npus);
+    for (size_t i = 0; i < n_filtered; ++i)
+    {
+        q_generic::QantDeviceCapability capabilities[4];
+        size_t n_capabilities = 0;
+        REQUIRE(q_info::get_capabilities(static_cast<int32_t>(filtered_idxs[i]), capabilities, 4, &n_capabilities) == 0);
+        auto const supports = [&](q_generic::QantDeviceCapability op)
+        { return std::find(capabilities, capabilities + n_capabilities, op) != capabilities + n_capabilities; };
+        REQUIRE(supports(q_generic::Mul));
+        REQUIRE(supports(q_generic::MemHandling));
+    }
+
+    // capacity too small: fails, but reports the required count
+    size_t required = 0;
+    REQUIRE(q_generic::get_available_npus(nullptr, 0, idxs, serials, 0, &required) != 0);
+    REQUIRE(required == n_npus);
+}
+
+TEST_CASE("capabilities")
+{
+    q_generic::QantDeviceCapability capabilities[4];
+    size_t n_capabilities = 0;
+    REQUIRE(q_info::get_capabilities(0, capabilities, 4, &n_capabilities) == 0);
+    REQUIRE(n_capabilities <= 4);
+    REQUIRE(q_info::get_capabilities(-2, capabilities, 4, &n_capabilities) != 0);
+
+    // capacity too small: fails, but reports the required count
+    size_t required = 0;
+    if (n_capabilities > 0)
+    {
+        REQUIRE(q_info::get_capabilities(0, capabilities, 0, &required) != 0);
+        REQUIRE(required == n_capabilities);
+    }
 }
 
 TEST_CASE("reset_performance_counter")

@@ -1,6 +1,8 @@
 use half::bf16;
 
-use crate::{data_structures::QantTensor4, errors::ToolkitError, toolkit_error};
+use crate::{
+    data_structures::QantTensor4, errors::ToolkitError, qant_driver_import, toolkit_error,
+};
 use rayon::prelude::*;
 
 #[derive(Clone, Copy)]
@@ -31,6 +33,9 @@ impl std::fmt::Display for PoolingMode {
 /// Performs 2D pooling on the input feature data.
 ///
 /// # Parameters
+/// - `npu_id`: This operation is not dispatched to any NPU. `npu_id` is
+///   accepted for API consistency and resolved like for all other operations:
+///   it must be `-1` (auto-select) or the id of an available NPU.
 /// - `image`: A reference to the input feature data (`QantTensor4`) to be processed.
 ///   This represents the image or feature map on which pooling will be applied.
 /// - `attributes`: A `PoolingAttributes` struct containing the parameters for the pooling operation:
@@ -45,11 +50,12 @@ impl std::fmt::Display for PoolingMode {
 /// - `Ok(QantTensor4)`: The resulting feature data after applying pooling.
 /// - `Err(ToolkitError)`: An error if the operation fails, such as due to invalid dimensions or attributes.
 fn pool2d_fprop<'b>(
-    _npu_id: u32,
+    npu_id: i32,
     image: &QantTensor4<'_>,
     attributes: PoolingAttributes,
     mode: PoolingMode,
 ) -> Result<QantTensor4<'b>, ToolkitError> {
+    qant_driver_import::check_npu_id(npu_id)?;
     let &[n_batches, data_channels, data_height, data_width] = image.shape();
 
     let output_height =
@@ -148,6 +154,9 @@ fn pool2d_fprop<'b>(
 /// Input size has to be integer multiple of output size.
 ///
 /// # Parameters
+/// - `npu_id`: This operation is not dispatched to any NPU. `npu_id` is
+///   accepted for API consistency and resolved like for all other operations:
+///   it must be `-1` (auto-select) or the id of an available NPU.
 /// - `image`: A reference to the input feature data (`QantTensor4`) to be processed.
 ///   This represents the image or feature map on which pooling will be applied.
 /// - `output_height`: The target output height, has to be equal to `output_width`.
@@ -158,12 +167,13 @@ fn pool2d_fprop<'b>(
 /// - `Ok(QantTensor4)`: The resulting feature data after applying pooling.
 /// - `Err(ToolkitError)`: An error if the operation fails, such as due to invalid dimensions or attributes.
 fn adaptivepool2d_fprop<'b>(
-    _npu_id: u32,
+    npu_id: i32,
     image: &QantTensor4<'_>,
     output_height: usize,
     output_width: usize,
     mode: PoolingMode,
 ) -> Result<QantTensor4<'b>, ToolkitError> {
+    qant_driver_import::check_npu_id(npu_id)?;
     let [_, _, data_height, data_width] = image.shape();
 
     if data_height != data_width {
@@ -193,12 +203,15 @@ fn adaptivepool2d_fprop<'b>(
         padding: 0,
         count_include_pad: false,
     };
-    pool2d_fprop(_npu_id, image, attributes, mode)
+    pool2d_fprop(npu_id, image, attributes, mode)
 }
 
 /// Performs 2D max pooling on the input feature data.
 ///
 /// # Parameters
+/// - `npu_id`: This operation is not dispatched to any NPU. `npu_id` is
+///   accepted for API consistency and resolved like for all other operations:
+///   it must be `-1` (auto-select) or the id of an available NPU.
 /// - `image`: A reference to the input feature data (`QantTensor4`) to be processed.
 ///   This represents the image or feature map on which max pooling will be applied.
 /// - `attributes`: A `PoolingAttributes` struct containing the parameters for the pooling operation:
@@ -212,16 +225,19 @@ fn adaptivepool2d_fprop<'b>(
 /// - `Ok(QantTensor4)`: The resulting feature data after applying max pooling.
 /// - `Err(ToolkitError)`: An error if the operation fails, such as due to invalid dimensions or attributes.
 pub fn maxpool2d_fprop<'b>(
-    _npu_id: u32,
+    npu_id: i32,
     image: &QantTensor4<'_>,
     attributes: PoolingAttributes,
 ) -> Result<QantTensor4<'b>, ToolkitError> {
-    pool2d_fprop(_npu_id, image, attributes, PoolingMode::Maximum)
+    pool2d_fprop(npu_id, image, attributes, PoolingMode::Maximum)
 }
 
 /// Performs 2D avg pooling on the input feature data.
 ///
 /// # Parameters
+/// - `npu_id`: This operation is not dispatched to any NPU. `npu_id` is
+///   accepted for API consistency and resolved like for all other operations:
+///   it must be `-1` (auto-select) or the id of an available NPU.
 /// - `image`: A reference to the input feature data (`QantTensor4`) to be processed.
 ///   This represents the image or feature map on which avg pooling will be applied.
 /// - `attributes`: A `PoolingAttributes` struct containing the parameters for the pooling operation:
@@ -235,17 +251,20 @@ pub fn maxpool2d_fprop<'b>(
 /// - `Ok(QantTensor4)`: The resulting feature data after applying avg pooling.
 /// - `Err(ToolkitError)`: An error if the operation fails, such as due to invalid dimensions or attributes.
 pub fn avgpool2d_fprop<'b>(
-    _npu_id: u32,
+    npu_id: i32,
     image: &QantTensor4<'_>,
     attributes: PoolingAttributes,
 ) -> Result<QantTensor4<'b>, ToolkitError> {
-    pool2d_fprop(_npu_id, image, attributes, PoolingMode::Average)
+    pool2d_fprop(npu_id, image, attributes, PoolingMode::Average)
 }
 
 /// Performs 2D max adaptive pooling on the input feature data. Only works for symmetric input and output sizes.
 /// Input size has to be integer multiple of output size.
 ///
 /// # Parameters
+/// - `npu_id`: This operation is not dispatched to any NPU. `npu_id` is
+///   accepted for API consistency and resolved like for all other operations:
+///   it must be `-1` (auto-select) or the id of an available NPU.
 /// - `image`: A reference to the input feature data (`QantTensor4`) to be processed.
 ///   This represents the image or feature map on which pooling will be applied.
 /// - `output_height`: The target output height, has to be equal to `output_width`.
@@ -255,13 +274,13 @@ pub fn avgpool2d_fprop<'b>(
 /// - `Ok(QantTensor4)`: The resulting feature data after applying pooling.
 /// - `Err(ToolkitError)`: An error if the operation fails, such as due to invalid dimensions or attributes.
 pub fn adaptive_maxpool2d_fprop<'b>(
-    _npu_id: u32,
+    npu_id: i32,
     image: &QantTensor4<'_>,
     output_height: usize,
     output_width: usize,
 ) -> Result<QantTensor4<'b>, ToolkitError> {
     adaptivepool2d_fprop(
-        _npu_id,
+        npu_id,
         image,
         output_height,
         output_width,
@@ -273,6 +292,9 @@ pub fn adaptive_maxpool2d_fprop<'b>(
 /// Input size has to be integer multiple of output size.
 ///
 /// # Parameters
+/// - `npu_id`: This operation is not dispatched to any NPU. `npu_id` is
+///   accepted for API consistency and resolved like for all other operations:
+///   it must be `-1` (auto-select) or the id of an available NPU.
 /// - `image`: A reference to the input feature data (`QantTensor4`) to be processed.
 ///   This represents the image or feature map on which pooling will be applied.
 /// - `output_height`: The target output height, has to be equal to `output_width`.
@@ -282,13 +304,13 @@ pub fn adaptive_maxpool2d_fprop<'b>(
 /// - `Ok(QantTensor4)`: The resulting feature data after applying pooling.
 /// - `Err(ToolkitError)`: An error if the operation fails, such as due to invalid dimensions or attributes.
 pub fn adaptive_avgpool2d_fprop<'b>(
-    _npu_id: u32,
+    npu_id: i32,
     image: &QantTensor4<'_>,
     output_height: usize,
     output_width: usize,
 ) -> Result<QantTensor4<'b>, ToolkitError> {
     adaptivepool2d_fprop(
-        _npu_id,
+        npu_id,
         image,
         output_height,
         output_width,

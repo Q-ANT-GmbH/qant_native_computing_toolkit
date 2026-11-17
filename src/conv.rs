@@ -69,7 +69,7 @@ impl ConvWeightsHandle {
 }
 
 pub fn upload_conv_weights(
-    npu_id: u32,
+    npu_id: i32,
     weights: &QantTensor4,
 ) -> Result<ConvWeightsHandle, ToolkitError> {
     let &[out_channels, in_channels, kernel_height, kernel_width] = weights.shape();
@@ -95,7 +95,7 @@ pub fn upload_conv_weights(
 /// - `Ok(QantTensor4)`: The resulting feature data after applying convolution.
 /// - `Err(ToolkitError)`: An error if the operation fails, e.g., due to invalid dimensions or attributes.
 pub fn conv_fprop<'b>(
-    npu_id: u32,
+    npu_id: i32,
     features: &QantTensor4,
     weights: &QantTensor4,
     attributes: ConvAttributes,
@@ -170,7 +170,7 @@ impl ConvTransposeWeightsHandle {
 }
 
 pub fn upload_conv_transpose_weights(
-    npu_id: u32,
+    npu_id: i32,
     weights: &QantTensor4,
 ) -> Result<ConvTransposeWeightsHandle, ToolkitError> {
     let &[in_channels, out_channels, kernel_height, kernel_width] = weights.shape();
@@ -203,7 +203,7 @@ pub fn upload_conv_transpose_weights(
 }
 
 pub fn conv_transpose_fprop<'b>(
-    npu_id: u32,
+    npu_id: i32,
     features: &QantTensor4,
     weights: &QantTensor4,
     attributes: ConvTransposeAttributes,
@@ -296,9 +296,9 @@ fn mul_weights_with_patches<'b>(
     let patches = QantTensor2::new(patches.data(), [n_rows, patches.shape()[2]])?;
 
     let patches_handle =
-        QantMemoryHandle::from_matrix(weights.npu_id(), &patches, QantDataRole::Features)?;
+        QantMemoryHandle::from_matrix(weights.npu_id() as i32, &patches, QantDataRole::Features)?;
     let result_handle = QantMemoryHandle::allocate(
-        weights.npu_id(),
+        weights.npu_id() as i32,
         n_rows,
         out_channels,
         QantDataRole::Features,

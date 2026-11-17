@@ -4,7 +4,7 @@ use crate::{
 
 /// Multiplies elementwise us and vs, for any shape
 pub fn mul<'a, 'b>(
-    npu_id: u32,
+    npu_id: i32,
     us: &QantTensor1<'a>,
     vs: &QantTensor1<'a>,
 ) -> Result<QantTensor1<'b>, ToolkitError> {

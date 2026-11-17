@@ -3,14 +3,16 @@ from __future__ import annotations
 import pathlib
 
 import numpy as np
-from ml_dtypes import bfloat16
+from ml_dtypes import bcomplex32, bfloat16
 
 import qant_native_computing_toolkit._backend as backend
 
 from ._utils import (
+    AUTO_NPU_ID,
     assert_nonnegative_int,
     assert_np_type_dim,
     assert_same_shape,
+    assert_valid_npu_id,
     repeat_or_noop,
 )
 
@@ -26,9 +28,9 @@ def init_npu(id: int) -> None:
     to free devices for use by a different process, see :func:`release_npu`.
 
     Args:
-        id: The identifier of the NPU that is to be initialised.
+        id (int): The identifier of the NPU that is to be initialised.
     """
-    assert_nonnegative_int(id)
+    assert_valid_npu_id(id, name="id")
     backend.init_npu(id)
 
 
@@ -38,20 +40,22 @@ def release_npu(id: int) -> None:
     Only relevant if multiple processes want to access the same device.
 
     Args:
-        id: The identifier of the NPU that is to be released.
+        id (int): The identifier of the NPU that is to be released.
     """
-    assert_nonnegative_int(id)
+    assert_valid_npu_id(id, name="id")
     backend.release_npu(id)
 
 
-def mul_elementwise(us: np.ndarray, vs: np.ndarray, device_id: int = 0) -> np.ndarray:
+def mul_elementwise(
+    us: np.ndarray, vs: np.ndarray, device_id: int = AUTO_NPU_ID
+) -> np.ndarray:
     """
     Multiply two arrays element-wise.
 
     Args:
         us (np.ndarray): First input array, must be of type `bfloat16` and have same shape as vs.
         vs (np.ndarray): Second input array, must be of type `bfloat16` and have same shape as us.
-        device_id (int, optional): The identifier of the NPU on which the operation is performed.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
     Returns:
         np.ndarray: A new array of the same shape as `us` and `vs`, containing the
@@ -60,7 +64,7 @@ def mul_elementwise(us: np.ndarray, vs: np.ndarray, device_id: int = 0) -> np.nd
     for input, input_name in zip([us, vs], ["us", "vs"]):
         assert_np_type_dim(input, bfloat16, None, name=input_name)
     assert_same_shape(us, vs, name_x="us", name_y="vs")
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
 
     shape = us.shape
 
@@ -68,7 +72,7 @@ def mul_elementwise(us: np.ndarray, vs: np.ndarray, device_id: int = 0) -> np.nd
 
 
 def linear_fprop(
-    features: np.ndarray, weights: np.ndarray, device_id: int = 0
+    features: np.ndarray, weights: np.ndarray, device_id: int = AUTO_NPU_ID
 ) -> np.ndarray:
     """
     Performs a linear forward propagation between input features and a weight matrix.
@@ -87,7 +91,7 @@ def linear_fprop(
     Args:
         features (np.ndarray): An ND array of input features with shape (<batch dimensions>, n_channels_in). Must be dtype=bfloat16.
         weights (np.ndarray): A 2D array representing the weights with shape (n_channels_out, n_channels_in). Must be dtype=bfloat16.
-        device_id (int, optional): The identifier of the NPU on which the operation is performed.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
     Returns:
         np.ndarray: An ND array containing the result of the forward propagation with shape (<batch dimensions>, n_channels_out).
@@ -96,7 +100,7 @@ def linear_fprop(
     features = features.reshape(-1, original_shape[-1])
     assert_np_type_dim(features, bfloat16, 2, name="features")
     assert_np_type_dim(weights, bfloat16, 2, name="weights")
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
 
     if not features.shape[-1] == weights.shape[1]:
         raise ValueError(
@@ -145,7 +149,7 @@ def conv_fprop(
     padding: int,
     stride: int,
     dilation: int,
-    device_id: int = 0,
+    device_id: int = AUTO_NPU_ID,
 ) -> np.ndarray:
     """
     Performs a forward pass through a convolution layer.
@@ -156,7 +160,7 @@ def conv_fprop(
         padding (int): Amount of padding added to the input features.
         stride (int): Step size for moving the kernel over the input features.
         dilation (int): Dilation ("zoom out") of the kernel.
-        device_id (int, optional): The identifier of the NPU on which the operation is performed.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
     Returns:
         np.ndarray: An ND array containing the result of the convolution with shape ([n_batches], out_channels, height_out, width_out).
@@ -172,7 +176,7 @@ def conv_fprop(
     assert_nonnegative_int(padding, name="padding")
     assert_nonnegative_int(stride, name="stride")
     assert_nonnegative_int(dilation, name="dilation")
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
 
     features_batched = features[np.newaxis, ...] if features.ndim == 3 else features
     result = backend.conv_fprop(
@@ -182,7 +186,7 @@ def conv_fprop(
 
 
 def upload_conv_weights(
-    weights: np.ndarray, device_id: int = 0
+    weights: np.ndarray, device_id: int = AUTO_NPU_ID
 ) -> backend.ConvWeightsHandle:
     """
     Uploads convolution weights to device memory for repeated use with
@@ -190,13 +194,13 @@ def upload_conv_weights(
 
     Args:
         weights (np.ndarray): A 4D array of weights with shape (out_channels, in_channels, height, width). Must be dtype=bfloat16.
-        device_id (int, optional): The identifier of the NPU on which the memory is allocated.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
     Returns:
         backend.ConvWeightsHandle: A handle to the device memory holding the uploaded weights.
     """
     assert_np_type_dim(weights, bfloat16, 4, name="weights")
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
 
     return backend.upload_conv_weights(device_id, weights)
 
@@ -248,7 +252,7 @@ def conv_transpose_fprop(
     stride: int,
     dilation: int,
     output_padding: int,
-    device_id: int = 0,
+    device_id: int = AUTO_NPU_ID,
 ) -> np.ndarray:
     """
     Performs a forward pass through a transposed convolution layer.
@@ -260,7 +264,7 @@ def conv_transpose_fprop(
         stride (int): Step size for moving the kernel over the input features.
         dilation (int): Dilation ("zoom out") of the kernel.
         output_padding (int): Padding for the returned features.
-        device_id (int, optional): The identifier of the NPU on which the operation is performed.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
     Returns:
         np.ndarray: An ND array containing the result of the transpose convolution with shape ([n_batches], out_channels, height_out, width_out).
@@ -277,7 +281,7 @@ def conv_transpose_fprop(
     assert_nonnegative_int(stride, name="stride")
     assert_nonnegative_int(dilation, name="dilation")
     assert_nonnegative_int(output_padding, name="output_padding")
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
 
     features_batched = features[np.newaxis, ...] if features.ndim == 3 else features
     result = backend.conv_transpose_fprop(
@@ -287,7 +291,7 @@ def conv_transpose_fprop(
 
 
 def upload_conv_transpose_weights(
-    weights: np.ndarray, device_id: int = 0
+    weights: np.ndarray, device_id: int = AUTO_NPU_ID
 ) -> backend.ConvTransposeWeightsHandle:
     """
     Uploads transposed convolution weights to device memory for repeated use with
@@ -295,13 +299,13 @@ def upload_conv_transpose_weights(
 
     Args:
         weights (np.ndarray): A 4D array of weights with shape (in_channels, out_channels, height, width). Must be dtype=bfloat16.
-        device_id (int, optional): The identifier of the NPU on which the memory is allocated.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
     Returns:
         backend.ConvTransposeWeightsHandle: A handle to the device memory holding the uploaded weights.
     """
     assert_np_type_dim(weights, bfloat16, 4, name="weights")
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
 
     return backend.upload_conv_transpose_weights(device_id, weights)
 
@@ -350,7 +354,7 @@ def conv_transpose_fprop_preloaded_weights(
 
 
 def add_bias_fprop(
-    features: np.ndarray, bias: np.ndarray, device_id: int = 0
+    features: np.ndarray, bias: np.ndarray, device_id: int = AUTO_NPU_ID
 ) -> np.ndarray:
     """
     Performs a forward pass through a bias adder. Aka element-wise addition.
@@ -359,14 +363,14 @@ def add_bias_fprop(
     Args:
         features (np.ndarray): An array of 1 to 4 dimensions of input features with shape ([batches], n_channels, [height, width]). Must be dtype=bfloat16.
         bias (np.ndarray): A 1D array of bias values with shape (n_channels). Must be dtype=bfloat16.
-        device_id (int, optional): The identifier of the NPU on which the operation is performed.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
     Returns:
         np.ndarray: A 1-4D array of input features with shape ([batches], n_channels, [height, width]) containing the result of the addition.
     """
     assert_np_type_dim(features, bfloat16, [1, 2, 3, 4], name="features")
     assert_np_type_dim(bias, bfloat16, 1, name="bias")
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
 
     if features.ndim == 1:
         features = features[np.newaxis, ...]
@@ -385,7 +389,7 @@ def add_bias_fprop(
 
 
 def calc_scaled_periodic_nl_fprop(
-    features: np.ndarray, weights: np.ndarray, device_id: int = 0
+    features: np.ndarray, weights: np.ndarray, device_id: int = AUTO_NPU_ID
 ) -> np.ndarray:
     """
     Calculates a scaled periodic nonlinearity pairwise for all elements of features
@@ -401,7 +405,7 @@ def calc_scaled_periodic_nl_fprop(
     Args:
         features (np.ndarray): A 1D array of input features. Must be dtype=bfloat16.
         weights (np.ndarray): A 1D array of weights. Must be dtype=bfloat16.
-        device_id (int, optional): The identifier of the NPU on which the operation is performed.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
     Returns:
         np.ndarray: A 1D array containing the result, same shape as input features.
@@ -409,7 +413,7 @@ def calc_scaled_periodic_nl_fprop(
     assert_np_type_dim(features, bfloat16, 1, name="features")
     assert_np_type_dim(weights, bfloat16, 1, name="weights")
     assert_same_shape(features, weights, name_x="features", name_y="weights")
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
 
     return backend.calc_scaled_periodic_nl_fprop(device_id, features, weights)
 
@@ -419,7 +423,7 @@ def calc_kan_layer_fprop(
     phis: np.ndarray,
     ampls: np.ndarray,
     ks: np.ndarray,
-    device_id: int = 0,
+    device_id: int = AUTO_NPU_ID,
 ) -> np.ndarray:
     """
     Calculates a Q.ANT version of a KAN layer (https://arxiv.org/abs/2404.19756)
@@ -445,7 +449,7 @@ def calc_kan_layer_fprop(
         phis (np.ndarray): A 3D array of phase offsets, shape (n_channels_out, n_channels_in, len(ks)), dtype=bfloat16.
         ampls (np.ndarray): A 3D array of amplitudes, same shape as phis, dtype=bfloat16.
         ks (np.ndarray): A 1D array of frequency components, dtype=bfloat16.
-        device_id (int, optional): The identifier of the NPU on which the operation is performed.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
     Returns:
         np.ndarray: The result of the KAN layer with shape (<batch dimensions>, n_channels_out), dtype=bfloat16.
@@ -457,7 +461,7 @@ def calc_kan_layer_fprop(
     assert_np_type_dim(phis, bfloat16, 3, name="phis")
     assert_np_type_dim(ampls, bfloat16, 3, name="ampls")
     assert_np_type_dim(ks, bfloat16, 1, name="ks")
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
     assert_same_shape(phis, ampls, name_x="phis", name_y="ampls")
     # recreate the batch dimensions
     shape_res = shape_features
@@ -467,48 +471,48 @@ def calc_kan_layer_fprop(
     )
 
 
-def relu_fprop(features: np.ndarray, device_id: int = 0) -> np.ndarray:
+def relu_fprop(features: np.ndarray, device_id: int = AUTO_NPU_ID) -> np.ndarray:
     """
     Performs a forward pass through a `ReLU <https://en.wikipedia.org/wiki/Rectifier_(neural_networks)>`_ layer.
 
     Args:
         features (np.ndarray): An ND array of input features. Must be dtype=bfloat16.
-        device_id (int, optional): The identifier of the NPU on which the operation is performed.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
     Returns:
         np.ndarray: An ND array containing the result of the ReLU operation, same shape as input features.
     """
 
     assert_np_type_dim(features, bfloat16, None, name="features")
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
     shape = features.shape
     return backend.relu_fprop(device_id, features.flatten()).reshape(shape)
 
 
-def sigmoid_fprop(features: np.ndarray, device_id: int = 0) -> np.ndarray:
+def sigmoid_fprop(features: np.ndarray, device_id: int = AUTO_NPU_ID) -> np.ndarray:
     """
     Performs a forward pass through a `Sigmoid <https://en.wikipedia.org/wiki/Sigmoid_function>`_ layer.
 
     Args:
         features (np.ndarray): An ND array of input features. Must be dtype=bfloat16.
-        device_id (int, optional): The identifier of the NPU on which the operation is performed.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
     Returns:
         np.ndarray: An ND array containing the result of the Sigmoid operation with the same shape as the input.
     """
     assert_np_type_dim(features, bfloat16, None, name="features")
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
     shape = features.shape
     return backend.sigmoid_fprop(device_id, features.flatten()).reshape(shape)
 
 
-def softmax_fprop(features: np.ndarray, device_id: int = 0) -> np.ndarray:
+def softmax_fprop(features: np.ndarray, device_id: int = AUTO_NPU_ID) -> np.ndarray:
     """
     Performs a forward pass through a `Softmax <https://en.wikipedia.org/wiki/Softmax_function>`_ layer.
 
     Args:
         features (np.ndarray): An ND array of input features. Must be dtype=bfloat16. Softmax is applied along the last dimension, additional dimensions are treated as batch dimensions.
-        device_id (int, optional): The identifier of the NPU on which the operation is performed.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
     Returns:
         np.ndarray: An ND array, containing the result of the Softmax operation with the same shape as the input.
@@ -516,7 +520,7 @@ def softmax_fprop(features: np.ndarray, device_id: int = 0) -> np.ndarray:
     original_shape = features.shape
     features = features.reshape(-1, original_shape[-1])
     assert_np_type_dim(features, bfloat16, 2, name="features")
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
     res = backend.softmax_fprop(device_id, features).reshape(original_shape)
     return res
 
@@ -528,7 +532,7 @@ def batchnorm2d_fprop(
     weights: np.ndarray,
     bias: np.ndarray,
     eps: int,
-    device_id: int = 0,
+    device_id: int = AUTO_NPU_ID,
 ) -> np.ndarray:
     """
     Performs a forward pass through a `batchnorm2d <https://en.wikipedia.org/wiki/Normalization_(machine_learning)#Batch_normalization>`_ layer
@@ -540,7 +544,7 @@ def batchnorm2d_fprop(
         weights (np.ndarray): A 1D array containing the scale parameters for each input feature.
         bias (np.ndarray): A 1D array containing the bias parameters for each input feature.
         eps (float): A small value added to the variance for numerical stability.
-        device_id (int, optional): The identifier of the NPU on which the operation is performed.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
 
     Returns:
@@ -551,7 +555,7 @@ def batchnorm2d_fprop(
     assert_np_type_dim(variances, bfloat16, 1, name="variances")
     assert_np_type_dim(weights, bfloat16, 1, name="weights")
     assert_np_type_dim(bias, bfloat16, 1, name="bias")
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
 
     features_batched = features[np.newaxis, ...] if features.ndim == 3 else features
     result = backend.batchnorm2d_fprop(
@@ -565,7 +569,7 @@ def maxpool2d_fprop(
     kernel_size: int | tuple[int, int],
     stride: int,
     padding: int,
-    device_id: int = 0,
+    device_id: int = AUTO_NPU_ID,
 ) -> np.ndarray:
     """
     Performs a forward pass through a `maxpooling2d <https://en.wikipedia.org/wiki/Pooling_layer>`_ layer
@@ -575,7 +579,7 @@ def maxpool2d_fprop(
         kernel_size (int | (int, int)): Pooling window dimensions. If int, same size is used for both dimensions.
         stride (int): Step size for sliding pooling window (must be non-negative).
         padding (int): Zero-padding size to apply to input boundaries (must be non-negative).
-        device_id (int, optional): The identifier of the device on which the operation is performed.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
     Returns:
         np.ndarray: An ND array containing the result of the maxpool operation with shape ([batches], n_channels, output_height, output_width).
@@ -589,7 +593,7 @@ def maxpool2d_fprop(
     assert_nonnegative_int(stride, name="stride")
     assert_nonnegative_int(kernel_height, name="kernel_height")
     assert_nonnegative_int(kernel_width, name="kernel_width")
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
 
     features_batched = features[np.newaxis, ...] if features.ndim == 3 else features
     result = backend.maxpool2d_fprop(
@@ -604,7 +608,7 @@ def avgpool2d_fprop(
     stride: int,
     padding: int,
     count_include_pad: bool = True,
-    device_id: int = 0,
+    device_id: int = AUTO_NPU_ID,
 ) -> np.ndarray:
     """
     Apply 2D `avg pooling <https://en.wikipedia.org/wiki/Pooling_layer>`_ operation to input features using specified parameters.
@@ -615,7 +619,7 @@ def avgpool2d_fprop(
         stride (int): Step size for sliding pooling window (must be non-negative).
         padding (int): Zero-padding size to apply to input boundaries (must be non-negative).
         count_include_pad (bool, optional): When True, will include the zero-padding in the averaging calculation.
-        device_id (int, optional): The identifier of the device on which the operation is performed.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
     Returns:
         np.ndarray: An ND array containing the result of the avgpool operation with shape ([batches], n_channels, output_height, output_width).
@@ -629,7 +633,7 @@ def avgpool2d_fprop(
     assert_nonnegative_int(stride, name="stride")
     assert_nonnegative_int(kernel_height, name="kernel_height")
     assert_nonnegative_int(kernel_width, name="kernel_width")
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
 
     features_batched = features[np.newaxis, ...] if features.ndim == 3 else features
     result = backend.avgpool2d_fprop(
@@ -647,7 +651,7 @@ def avgpool2d_fprop(
 def adaptive_maxpool2d_fprop(
     features: np.ndarray,
     output_size: int | tuple[int, int],
-    device_id: int = 0,
+    device_id: int = AUTO_NPU_ID,
 ) -> np.ndarray:
     """
     Performs a forward pass through an adaptive maxpooling2d layer.
@@ -656,7 +660,7 @@ def adaptive_maxpool2d_fprop(
     Args:
         features (np.ndarray): A 3D array of input features with shape (n_channels, height, width) or a 4D array of input features with the shape (batches, n_channels, height, width). Must be dtype=bfloat16.
         output_size (int | (int, int)): Pooling window dimensions. If int, same size is used for both dimensions.
-        device_id (int, optional): The identifier of the device on which the operation is performed.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
     Returns:
         np.ndarray: An ND array containing the result of the adaptive maxpool operation with shape ([batches], n_channels, output_height, output_width).
@@ -668,7 +672,7 @@ def adaptive_maxpool2d_fprop(
 
     assert_nonnegative_int(output_height, name="output_height")
     assert_nonnegative_int(output_width, name="output_width")
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
 
     features_batched = features[np.newaxis, ...] if features.ndim == 3 else features
     result = backend.adaptive_maxpool2d_fprop(
@@ -680,7 +684,7 @@ def adaptive_maxpool2d_fprop(
 def adaptive_avgpool2d_fprop(
     features: np.ndarray,
     output_size: int | tuple[int, int],
-    device_id: int = 0,
+    device_id: int = AUTO_NPU_ID,
 ) -> np.ndarray:
     """
     Performs a forward pass through an adaptive avgpooling2d layer.
@@ -689,7 +693,7 @@ def adaptive_avgpool2d_fprop(
     Args:
         features (np.ndarray): A 3D array of input features with shape (n_channels, height, width) or a 4D array of input features with the shape (batches, n_channels, height, width). Must be dtype=bfloat16.
         output_size (int | (int, int)): Pooling window dimensions. If int, same size is used for both dimensions.
-        device_id (int, optional): The identifier of the device on which the operation is performed.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
     Returns:
         np.ndarray: An ND array containing the result of the adaptive avgpool operation with shape ([batches], n_channels, output_height, output_width).
@@ -701,7 +705,7 @@ def adaptive_avgpool2d_fprop(
 
     assert_nonnegative_int(output_height, name="output_height")
     assert_nonnegative_int(output_width, name="output_width")
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
 
     features_batched = features[np.newaxis, ...] if features.ndim == 3 else features
     result = backend.adaptive_avgpool2d_fprop(
@@ -718,7 +722,7 @@ def _assert_is_data_role(data_role):
 
 
 def allocate(
-    rows: int, cols: int, data_role: backend.DataRole, device_id: int = 0
+    rows: int, cols: int, data_role: backend.DataRole, device_id: int = AUTO_NPU_ID
 ) -> backend.QantMemoryHandle:
     """
     Allocates a block of device memory sized to hold a (rows, cols) matrix.
@@ -727,7 +731,7 @@ def allocate(
         rows (int): Number of rows of the matrix the memory is sized for.
         cols (int): Number of columns of the matrix the memory is sized for.
         data_role (backend.DataRole): Role of the data. Weights or Features.
-        device_id (int, optional): The identifier of the device on which the memory is allocated.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
     Returns:
         backend.QantMemoryHandle: A handle to the allocated device memory. The
@@ -737,12 +741,12 @@ def allocate(
     assert_nonnegative_int(rows, name="rows")
     assert_nonnegative_int(cols, name="cols")
     _assert_is_data_role(data_role)
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
     return backend.allocate(device_id, rows, cols, data_role)
 
 
 def upload(
-    data: np.ndarray, data_role: backend.DataRole, device_id: int = 0
+    data: np.ndarray, data_role: backend.DataRole, device_id: int = AUTO_NPU_ID
 ) -> backend.QantMemoryHandle:
     """
     Allocates a block of device memory sized to hold the matrix and uploads the matrix to it.
@@ -750,14 +754,14 @@ def upload(
     Args:
         data (np.ndarray): A 2D array with shape (rows, cols). Must be dtype=bfloat16.
         data_role (backend.DataRole): Role of the data. Weights or Features.
-        device_id (int, optional): The identifier of the device on which the memory is allocated.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
     Returns:
         backend.QantMemoryHandle: A handle to the allocated device memory with the matrix uploaded.
     """
     assert_np_type_dim(data, bfloat16, 2, name="data")
     _assert_is_data_role(data_role)
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
     return backend.upload(device_id, data, data_role)
 
 
@@ -818,88 +822,114 @@ def linear_fprop_preloaded(
     return result_handle
 
 
-def get_driver_info(device_id: int = 0) -> str:
+def get_driver_info(device_id: int = AUTO_NPU_ID) -> str:
     """
     Gets detailed information about the Q.ANT native computing driver and its direct dependencies.
 
     Args:
-        device_id (int, optional): The identifier of the device on which the operation is performed.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
     Returns:
         The information as a string
 
     """
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
     return backend.get_driver_info(device_id)
 
 
-def get_sensor_info(device_id: int) -> dict:
+def get_sensor_info(device_id: int = AUTO_NPU_ID) -> dict:
     """
     Get detailed information about the NPU sensors, e.g. temperature.
 
     Args:
-        device_id (int): The identifier of the device on which the operation is performed.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
     Returns:
         The information as a dictionary.
     """
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
     return backend.get_sensor_info(device_id)
 
 
-def get_available_npus() -> dict:
+def get_available_npus(
+    operations: list[backend.QantDeviceCapability] | None = None,
+) -> list[tuple[int, str]]:
     """
-    Lists all available NPUs on the system.
+    Lists the available NPUs that support all of the given operations.
 
     Args:
+        operations (list[QantDeviceCapability], optional): The operations
+            (Mul, NonLin, Dft, MemHandling) an NPU must support to be listed.
+            If omitted or empty, all available NPUs are listed.
 
     Returns:
-        npus (dict[int, str]): The mapping from device_id to serial number
+        npus (list[tuple[int, str]]): (device_id, serial number) of each matching NPU, sorted by device_id.
     """
-    return backend.get_available_npus()
+    if operations is None:
+        operations = []
+    return backend.get_available_npus(operations)
 
 
-def get_version_info(device_id: int) -> dict:
+def get_version_info(device_id: int = AUTO_NPU_ID) -> dict:
     """
     Gets information about the firmware versions.
 
     Args:
-        device_id (int): The identifier of the device on which the operation is performed.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
     Returns:
         The version information as a dictionary.
     """
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
     return backend.get_version_info(device_id)
 
 
-def get_perf_counter(device_id: int) -> dict:
+def get_capabilities(
+    device_id: int = AUTO_NPU_ID,
+) -> list[backend.QantDeviceCapability]:
+    """
+    Gets the operations supported by an NPU.
+
+    Args:
+        device_id (int, optional): The identifier of the NPU, e.g. one returned by get_available_npus. -1 (the default) selects the first enumerated NPU. Values below -1 raise ValueError.
+
+    Returns:
+        list[QantDeviceCapability]: The supported operations, a subset of
+            Mul (elementwise and matrix multiplication), NonLin (non-linear functions),
+            Dft (discrete Fourier transform) and MemHandling (allocating, uploading and
+            downloading NPU memory).
+    """
+    assert_valid_npu_id(device_id, name="device_id")
+    return backend.get_capabilities(device_id)
+
+
+def get_perf_counter(device_id: int = AUTO_NPU_ID) -> dict:
     """
     Gets the performance counters.
 
     Args:
-        device_id (int): The identifier of the device on which the operation is performed.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
     Returns:
         The information as a dictionary:
             'timebased_counter': Seconds since the last reset call.
             'stalling_counter': Seconds since the last reset call spent in idle (stalling) mode.
     """
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
     return backend.get_perf_counter(device_id)
 
 
-def reset_perf_counter(device_id: int):
+def reset_perf_counter(device_id: int = AUTO_NPU_ID):
     """
     Reset the performance counter.
 
     Args:
-        device_id (int): The identifier of the device on which the operation is performed.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
 
     Returns:
 
     """
-    assert_nonnegative_int(device_id, name="device_id")
+    assert_valid_npu_id(device_id, name="device_id")
     return backend.reset_perf_counter(device_id)
 
 
@@ -917,3 +947,31 @@ def setup_logging(folder_name: str | pathlib.Path, loglevel: int):
     folder_name_path = pathlib.Path(folder_name).resolve()
     folder_name_path.mkdir(exist_ok=True, parents=True)
     return backend.setup_logging(folder_name_path.as_posix(), loglevel)
+
+
+def dft(data: np.ndarray, device_id: int = AUTO_NPU_ID) -> np.ndarray:
+    """
+    Computes the unnormalised discrete Fourier transform (DFT) along the last axis.
+    All leading axes are treated as batch dimensions.
+
+    Args:
+        data (np.ndarray): An ND array (N >= 1) of complex numbers. Must be dtype=bcomplex32.
+        device_id (int, optional): The identifier of the NPU on which the operation is performed. -1 (the default) selects the first NPU that supports the operation. Values below -1 raise ValueError.
+
+    Returns:
+        np.ndarray: The DFT of the input data, same shape as the input, dtype=bcomplex32.
+    """
+    assert_np_type_dim(data, bcomplex32, None, name="data")
+    if data.size == 0:
+        return data.copy()
+    if data.ndim == 0:
+        raise ValueError("data must have at least one dimension")
+    assert_valid_npu_id(device_id, name="device_id")
+
+    shape = data.shape
+    # (..., dft_size) bcomplex32 -> (n_dfts, dft_size, 2) bfloat16 with interleaved real and imaginary parts
+    data_bf16 = np.ascontiguousarray(data).view(bfloat16).reshape(-1, shape[-1], 2)
+
+    result = backend.dft(device_id, data_bf16)
+
+    return np.ascontiguousarray(result).view(bcomplex32).reshape(shape)
