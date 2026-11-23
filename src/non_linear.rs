@@ -226,15 +226,17 @@ pub fn calc_kan_layer<'a, 'b>(
         .chunks(n_in * n_ks * n_batch)
         .flat_map(|chunk_ikb| {
             (0..n_batch).map(|batch_idx| {
-                // sum over the first two indices of the chunk, for each batch idx
-                let mut sum = Value::from_f32(0.);
+                // sum over the first two indices of the chunk, for each batch idx.
+                // Accumulate in f32 and round to Value (bf16) only once at the end;
+                // accumulating in bf16 makes the rounding error grow with n_in * n_ks.
+                let mut sum = 0.0f32;
                 for in_idx in 0..n_in {
                     for k_idx in 0..n_ks {
                         let flat_idx = ((in_idx * n_ks + k_idx) * n_batch) + batch_idx;
-                        sum += chunk_ikb[flat_idx];
+                        sum += chunk_ikb[flat_idx].to_f32();
                     }
                 }
-                sum
+                Value::from_f32(sum)
             })
         })
         .collect();
@@ -349,5 +351,38 @@ mod tests {
         let res = calc_kan_layer(0, &xs_in, &phis, &ampls, &ks).unwrap();
 
         assert_eq!(res.shape().clone(), [n_batches, n_out]);
+    }
+
+    #[test]
+    fn kan_accumulates_in_high_precision() {
+        // With xs = 0 and phis = 0 every term is cos(0) * 1 = 1, so each output is n_in * n_ks.
+        // bf16 has an 8-bit significand, so a bf16 accumulator stalls at 256 (256 + 1 rounds
+        // back to 256). The reduction over in/k must therefore be done at higher precision.
+        let n_in = 256;
+        let n_out = 3;
+        let n_ks = 4;
+        let n_batches = 2;
+
+        let xs_in = QantTensor2::new(
+            test_utils::to_bf16s(&vec![0.; n_batches * n_in]),
+            [n_batches, n_in],
+        )
+        .unwrap();
+        let ampls = QantTensor3::new(
+            test_utils::to_bf16s(&vec![1.; n_out * n_in * n_ks]),
+            [n_out, n_in, n_ks],
+        )
+        .unwrap();
+        let phis = QantTensor3::new(
+            test_utils::to_bf16s(&vec![0.; n_out * n_in * n_ks]),
+            [n_out, n_in, n_ks],
+        )
+        .unwrap();
+        let ks = test_utils::to_bf16s(&vec![0.5; n_ks]);
+
+        let res = calc_kan_layer(0, &xs_in, &phis, &ampls, &ks).unwrap();
+
+        let expected = test_utils::to_bf16s(&vec![(n_in * n_ks) as f64; n_batches * n_out]);
+        assert_eq!(res.data(), expected);
     }
 }
